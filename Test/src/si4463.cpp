@@ -4,6 +4,7 @@
 
 #include "si4463.h"
 #include "radio_config_Si4463.h"
+//#include "radio_config_Si4463_rs41.h"
 
 #define HSPI_SCLK 12
 #define HSPI_MISO 13
@@ -32,7 +33,7 @@ void spi_getresponse(SPIClass *hspi, uint8_t *buf, int len) {
     }
     Serial.println("");
 }
-void spi_sendcmd(SPIClass *hspi, uint8_t *buf, int len) {
+void spi_sendcmd(SPIClass *hspi, const uint8_t *buf, int len) {
     Serial.print("spi_sendcmd: ");
     uint8_t dummy[len];
     for(int i=0; i<len; i++) {
@@ -74,7 +75,7 @@ void si4463_reset() {
     ctsOK = 0;  // need to wait for CTS
 }
   
-void si4463_sendrecv(uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen) {
+void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen) {
     uint8_t ctsval;
     hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
 
@@ -107,10 +108,10 @@ void si4463_sendrecv(uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen) {
         if(ctsval==0xFF) { 
             Serial.println("Got CTS");
             if(resplen>0) {
-		Serial.printf("Reading response (%d bytes)\n", resplen);
+        Serial.printf("Reading response (%d bytes)\n", resplen);
                 spi_getresponse(hspi, resp, resplen);
-		for(int i=0; i<resplen; i++) { Serial.printf("%02X ", resp[i]); }
-		Serial.println("");
+        for(int i=0; i<resplen; i++) { Serial.printf("%02X ", resp[i]); }
+        Serial.println("");
             }
             digitalWrite(HSPI_CS, HIGH);
             break;
@@ -146,6 +147,25 @@ int si4463_configure() {
     return 0;
 }
 
+/*
+ * channel: frequency is base + channel * step (here we use base 400 MHz, step 100 kHz for now)
+ * condition: 0 to start immediatly
+ * next state: 0: remain or better 8: RX (re-arm for new packet)
+ * next states: next1 on preamble timeout, next2 on valid packet received, next3 on invalid packet received
+ */
+int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t next1, uint8_t next2, uint8_t next3)
+{
+    uint8_t buf[8];
+    buf[0] = 0x32;   // START_RX
+    buf[1] = channel;
+    buf[2] = condition;
+    buf[3] = (uint8_t)(rxlen >> 8);
+    buf[4] = (uint8_t)(rxlen);
+    buf[5] = next1;
+    buf[6] = next2;
+    buf[7] = next3;
+    return 0;
+}
 
 
 int spi_receive(int waitcts, uint8_t *retbuf, int retlen)
@@ -339,5 +359,20 @@ int si4463_partinfo(st_partinfo *pi) {
     return 0;
 }
 
+int si4463_getfifoinfo() {
+    const uint8_t fifoinfo[] = { 0x15, 0x00 };
+    uint8_t response[2];
+    si4463_sendrecv(fifoinfo, 2, response, 2);
+    return response[0];  // RX fifo, [1] is tx fifo (not used here)
+}
 
-
+// The readinfo command does not need to wait for CTS. The response is clocked out immediately after the command, do not toggle CS
+int si4463_readfifo(uint8_t *buf, int len) {
+    hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
+    digitalWrite(HSPI_CS, LOW);
+    hspi->transfer(0x77);
+    spi_getresponse(hspi, buf, len);
+    digitalWrite(HSPI_CS, HIGH);
+    hspi->endTransaction();
+    return 0;
+}

@@ -15,3 +15,9 @@ void si4463_test();
 void si4463_reset();
 int si4463_configure();
 int si4463_partinfo(st_partinfo *pi);
+
+int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t next1, uint8_t next2, uint8_t next3);
+
+int si4463_getfifoinfo();
+int si4463_readfifo(uint8_t *buf, int len);
+
