@@ -3,8 +3,8 @@
 // Just
 
 #include "si4463.h"
-//#include "radio_config_Si4463.h"
-#include "radio_config_Si4463_rs41.h"
+#include "radio_config_Si4463.h"
+//#include "radio_config_Si4463_rs41.h"
 
 #define HSPI_SCLK 12
 #define HSPI_MISO 13
@@ -26,21 +26,21 @@ SPIClass *hspi;
 
 #define DUMMY 0xFF
 void spi_getresponse(SPIClass *hspi, uint8_t *buf, int len) {
-    Serial.print("spi_getreponse: ");
+    //Serial.print("spi_getreponse: ");
     for(int i=0; i<len; i++) {
         buf[i] = hspi->transfer(DUMMY);
-        Serial.printf("%02x ", buf[i]);
+        //Serial.printf("%02x ", buf[i]);
     }
-    Serial.println("");
+    //Serial.println("");
 }
 void spi_sendcmd(SPIClass *hspi, const uint8_t *buf, int len) {
-    Serial.print("spi_sendcmd: ");
+    //Serial.print("spi_sendcmd: ");
     uint8_t dummy[len];
     for(int i=0; i<len; i++) {
         dummy[len] = hspi->transfer(buf[i]);
-        Serial.printf("%02x>%02x ", buf[i], dummy[i]);
+        //Serial.printf("%02x>%02x ", buf[i], dummy[i]);
     }
-    Serial.println();
+    //Serial.println();
 }
 
 // Radio chip functions
@@ -94,8 +94,8 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
     }
 
     // Send command
-    Serial.print("Sending: ");
-    for(int i=0; i<cmdlen; i++) { Serial.printf("%02x ", cmd[i]); }
+    //Serial.print("Sending: ");
+    //for(int i=0; i<cmdlen; i++) { Serial.printf("%02x ", cmd[i]); }
     digitalWrite(HSPI_CS, LOW);
     spi_sendcmd(hspi, cmd, cmdlen);
     digitalWrite(HSPI_CS, HIGH);
@@ -106,12 +106,12 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
         hspi->transfer(0x44);   // read CMD buffer
         ctsval = hspi->transfer(DUMMY);
         if(ctsval==0xFF) { 
-            Serial.println("Got CTS");
+            //Serial.print(" [CTS OK] ");
             if(resplen>0) {
-        Serial.printf("Reading response (%d bytes)\n", resplen);
+                //Serial.printf("Response (%d bytes): ", resplen);
                 spi_getresponse(hspi, resp, resplen);
-        for(int i=0; i<resplen; i++) { Serial.printf("%02X ", resp[i]); }
-        Serial.println("");
+                //for(int i=0; i<resplen; i++) { Serial.printf("%02X ", resp[i]); }
+                //Serial.println("");
             }
             digitalWrite(HSPI_CS, HIGH);
             break;
@@ -125,7 +125,6 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
         ctsOK = 1;
     }
     hspi->endTransaction();
-    Serial.println("OK");
 }
 
 
@@ -379,6 +378,7 @@ int si4463_readfifo(uint8_t *buf, int len) {
 }
 
 int si4463_get_int_status() {
+    return 0;
 }
 
 int si4463_starttx(uint8_t channel)

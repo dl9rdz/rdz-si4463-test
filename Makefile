@@ -3,4 +3,4 @@ all:
 	pio device monitor
 
 mon:
-	pio device monitor
+	pio device monitor -b 115200
