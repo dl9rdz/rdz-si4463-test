@@ -239,6 +239,15 @@ int decodeFrameDFM(uint8_t *data) {
         return (ret0|ret1|ret2)>=0 ? RX_OK : RX_ERROR;
 }
 
+int hammingDistance(uint32_t value1, uint32_t value2) {
+    // XOR the two values
+    uint32_t xorResult = value1 ^ value2;
+
+    // Use __builtin_popcount for hardware-specific population count
+    int differenceCount = __builtin_popcount(xorResult);
+
+    return differenceCount;
+}
 
 int procbyte(uint8_t dt) {
 	static uint8_t data[1024];
@@ -263,13 +272,18 @@ int procbyte(uint8_t dt) {
                 }
                 //
                 if(rxsearching) {
-                        if( rxdata == 0x6566A5AA || rxdata == 0x9A995A55 ) {
-				Serial.printf("\n**SYNC**");
+			//                        if( rxdata == 0x6566A5AA || rxdata == 0x9A995A55 ) {
+			if(hammingDistance(rxdata, 0x6566A5AA)<=2 || hammingDistance(rxdata, 0x9A995A55)<=2 ) {
+				if(rxdata==0x6566A5AA || rxdata==0x9A995A55)
+					Serial.printf("\n**SYNC**");
+				else
+					Serial.printf("\n**EEEESYNC %x ***", rxdata);
                                 rxsearching = false;
                                 rxbitc = 0;
                                 rxp = 0;
                                 rxbyte = 0;
-                                invers = (rxdata == 0x6566A5AA)?1:0;
+                                //invers = (rxdata == 0x6566A5AA)?1:0;
+                                invers = hammingDistance(rxdata, 0x6566A5AA)<=2 ?1:0;
                         }
                 } else {
                         rxbitc = (rxbitc+1)%16; // 16;
@@ -312,7 +326,7 @@ void loop() {
 	}
         uint8_t buf[n];
 	si4463_readfifo(buf, n);
-	//Serial.print("FIFO: ");
+	Serial.print("FIFO: ");
         for(int i=0; i<n; i++) {
   	    Serial.printf("%02x ", buf[i]);
 	    procbyte(buf[i]);
