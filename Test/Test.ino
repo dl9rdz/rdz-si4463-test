@@ -8,6 +8,9 @@ void setup() {
 
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
+    si4463_test();
+
+    si4463_reset();  // Power-cycle the radio chip
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
 }
 
@@ -21,7 +24,7 @@ void loop() {
 
     // receive immediately on ch35 (403.5 MHz)
     while(1) {
-        si4463_startrx(35, 0, 20/*len*/, 8, 8, 8);
+        si4463_startrx(40, 0, 50/*len*/, 8, 8, 8);
         delay(1000);
         int n = si4463_getfifoinfo();
         if(n==0) {

@@ -3,8 +3,8 @@
 // Just
 
 #include "si4463.h"
-#include "radio_config_Si4463.h"
-//#include "radio_config_Si4463_rs41.h"
+//#include "radio_config_Si4463.h"
+#include "radio_config_Si4463_rs41.h"
 
 #define HSPI_SCLK 12
 #define HSPI_MISO 13
@@ -164,6 +164,7 @@ int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t n
     buf[5] = next1;
     buf[6] = next2;
     buf[7] = next3;
+    si4463_sendrecv(buf, 8, (uint8_t *)0, 0);
     return 0;
 }
 
@@ -376,3 +377,27 @@ int si4463_readfifo(uint8_t *buf, int len) {
     hspi->endTransaction();
     return 0;
 }
+
+int si4463_get_int_status() {
+}
+
+int si4463_starttx(uint8_t channel)
+{
+    uint8_t condition = 0;
+    uint16_t txlen = 0;
+
+    // Clear any interrupts
+    si4463_get_int_status();
+
+    uint8_t buf[8];
+    buf[0] = 0x31;   // START_TX
+    buf[1] = channel;
+    buf[2] = condition;
+    buf[3] = (uint8_t)(txlen >> 8);
+    buf[4] = (uint8_t)(txlen);
+    buf[5] = 0;
+    buf[6] = 0;
+    si4463_sendrecv(buf, 7, (uint8_t *)0, 0);
+    return 0;
+}
+
