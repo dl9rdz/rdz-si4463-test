@@ -4,6 +4,7 @@
 
 #include "si4463.h"
 #include "radio_config_Si4463.h"
+//#include "radio_config_Si4463_dfm.h"
 //#include "radio_config_Si4463_rs41.h"
 
 #define HSPI_SCLK 12
@@ -400,4 +401,14 @@ int si4463_starttx(uint8_t channel)
     si4463_sendrecv(buf, 7, (uint8_t *)0, 0);
     return 0;
 }
+
+int si4463_getmodemstatus(uint8_t clearpend, st_modemstatus *status) {
+    uint8_t buf[2];
+    buf[0] = 0x22;  // GET_MODEM_STATUS
+    buf[1] = clearpend;
+    si4463_sendrecv(buf, 2, (uint8_t *)status, sizeof(st_modemstatus));
+    status->afc_freq_offset = swaps(status->afc_freq_offset);
+    return 0;
+}
+
 

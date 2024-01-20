@@ -219,7 +219,7 @@ int decodeFrameDFM(uint8_t *data) {
         int ret0 = hamming(hamming_conf,  7, block_conf);
         int ret1 = hamming(hamming_dat1, 13, block_dat1);
         int ret2 = hamming(hamming_dat2, 13, block_dat2);
-        Serial.printf("Hamming returns %d %d %d -- %d\n", ret0, ret1, ret2, ret0|ret1|ret2);
+        //Serial.printf("Hamming returns %d %d %d -- %d\n", ret0, ret1, ret2, ret0|ret1|ret2);
 
         byte byte_conf[4], byte_dat1[7], byte_dat2[7];
         bitsToBytes(block_conf, byte_conf, 7);
@@ -250,7 +250,7 @@ int hammingDistance(uint32_t value1, uint32_t value2) {
 }
 
 int procbyte(uint8_t dt) {
-	static uint8_t data[1024];
+        static uint8_t data[1024];
         static uint32_t rxdata = 0;
         static uint8_t rxbitc = 0;
         static uint8_t rxbyte = 0;
@@ -272,18 +272,18 @@ int procbyte(uint8_t dt) {
                 }
                 //
                 if(rxsearching) {
-			//                        if( rxdata == 0x6566A5AA || rxdata == 0x9A995A55 ) {
-			if(hammingDistance(rxdata, 0x6566A5AA)<=2 || hammingDistance(rxdata, 0x9A995A55)<=2 ) {
-				if(rxdata==0x6566A5AA || rxdata==0x9A995A55)
-					Serial.printf("\n**SYNC**");
-				else
-					Serial.printf("\n**EEEESYNC %x ***", rxdata);
+                        //                        if( rxdata == 0x6566A5AA || rxdata == 0x9A995A55 ) {
+                        if(hammingDistance(rxdata, 0x6566A5AA)<=3 || hammingDistance(rxdata, 0x9A995A55)<=3 ) {
+                                if(rxdata==0x6566A5AA || rxdata==0x9A995A55)
+                                        Serial.printf("goodsync[0] %x");
+                                else
+                                        Serial.printf("*ERRSYNC[%d] %x", hammingDistance(rxdata, 0x6566A5AA), rxdata);
                                 rxsearching = false;
                                 rxbitc = 0;
                                 rxp = 0;
                                 rxbyte = 0;
                                 //invers = (rxdata == 0x6566A5AA)?1:0;
-                                invers = hammingDistance(rxdata, 0x6566A5AA)<=2 ?1:0;
+                                invers = hammingDistance(rxdata, 0x6566A5AA)<=3 ?1:0;
                         }
                 } else {
                         rxbitc = (rxbitc+1)%16; // 16;
@@ -292,10 +292,10 @@ int procbyte(uint8_t dt) {
                                 data[rxp++] = rxbyte&0xff; // (rxbyte>>1)&0xff;
                                 if(rxp>=DFM_FRAMELEN) {
                                         rxsearching = true;
-                                        Serial.printf("\nGot a DFM frame: [%ld]", millis());
-					for(int i=0; i<DFM_FRAMELEN; i++) { Serial.printf("%02x ", data[i]); }
-					Serial.println("");
-					decodeFrameDFM(data);
+                                        Serial.printf("\nRaw [@%ld] ", millis());
+                                        for(int i=0; i<DFM_FRAMELEN; i++) { Serial.printf("%02x ", data[i]); }
+                                        Serial.println("");
+                                        decodeFrameDFM(data);
                                         //haveNewFrame = 1;
                                 }
                         }
@@ -311,28 +311,37 @@ void loop() {
     st_partinfo pi;
     int res = si4463_partinfo(&pi);
     Serial.printf("Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
-	pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
+        pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
 
     // receive immediately on ch35 (403.5 MHz)
-    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 8, 8, 8);
+    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
+    //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+    int last = millis();
     while(1) {
         //delay(1000);
         delay(50);
         int n = si4463_getfifoinfo();
         if(n==0) {
-            if( ((++blubb)&16) ==0) Serial.println("Empty fifo");
+            if( ((++blubb)&15) ==0) Serial.println("Empty fifo");
             delay(50);
-	    continue;
-	}
+    	    //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+            continue;
+        }
         uint8_t buf[n];
-	si4463_readfifo(buf, n);
-	Serial.print("FIFO: ");
+        si4463_readfifo(buf, n);
         for(int i=0; i<n; i++) {
-  	    Serial.printf("%02x ", buf[i]);
-	    procbyte(buf[i]);
+              Serial.printf("%02x ", buf[i]);
+            procbyte(buf[i]);
         }
         // reset packet length, so RX will continue
         //si4463_startrx(35, 0, 66/*len*/, 0, 0, 0);
+
+        if( (millis()-last)>1000 ) {
+            last = millis();
+            st_modemstatus status;
+            si4463_getmodemstatus(0, &status);
+            Serial.printf("RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
+        }
     }
     delay(20000);
 }
