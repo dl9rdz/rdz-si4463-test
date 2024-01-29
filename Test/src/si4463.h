@@ -22,12 +22,25 @@ void si4463_init();
 
 void si4463_test();
 
+void si4463_poweron();
+void si4463_poweroff();
 void si4463_reset();
+
+int si4463_power_up_cmd();
+int si4463_send_config(uint8_t *initdata);
 int si4463_configure();
+
+void si4463_setchannel(uint8_t ch);
+int si4463_setfreqoffset(uint16_t offset);
+void si4463_setfreq(float f);
+
+
 int si4463_partinfo(st_partinfo *pi);
+int si4463_getmodemstatus(uint8_t clear, st_modemstatus *status);
 
 int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t next1, uint8_t next2, uint8_t next3);
 
 int si4463_getfifoinfo();
 int si4463_readfifo(uint8_t *buf, int len);
-int si4463_getmodemstatus(uint8_t clear, st_modemstatus *status);
+
+

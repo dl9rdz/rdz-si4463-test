@@ -1,6 +1,8 @@
 
 #include "src/si4463.h"
 
+#include <ctype.h>
+
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
 
@@ -12,7 +14,7 @@ void setup() {
     si4463_reset();  // Power-cycle the radio chip
     si4463_test();
 
-    si4463_reset();  // Power-cycle the radio chip
+    //si4463_reset();  // Power-cycle the radio chip
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
 }
 
@@ -269,6 +271,9 @@ int procbyte(uint8_t dt) {
                 } else {
                         // "bit2" ==> 01 or 10 => 1, otherweise => 0
                         // not here: (10=>1, 01=>0)!!! rxbyte = rxbyte ^ d;
+			if( (rxdata&3)==0 || (rxdata&3)==3 ) {  // bad manchaster 
+			     Serial.print("//");
+			}
                 }
                 //
                 if(rxsearching) {
@@ -304,6 +309,137 @@ int procbyte(uint8_t dt) {
         return 0;
 }
 
+void cmd_power(const char *cmd)
+{
+	if(cmd[1]=='0') {
+		Serial.println("Shutdown [SDN=1]");
+		si4463_poweroff();
+		return;
+	}
+	if(cmd[1]=='\r'||cmd[1]=='\n'||cmd[1]==0 ) {
+		Serial.println("Shutdown for powercycle [SDN=1]");
+		si4463_poweroff();
+		delay(1);  // 1ms delay. spec requires >10us, so this is generous
+	}
+	if(cmd[1]=='\r'||cmd[1]=='\n' || cmd[1]==0 || cmd[1]=='1') {
+		Serial.println("Powerup [SDN=0], patches + RF_POWER_UP SPI command");
+		si4463_poweron();
+		si4463_test();
+		si4463_power_up_cmd();
+	}
+}
+
+extern uint8_t Radio_Configuration_Data_Array[];
+
+void cmd_config(const char *config)
+{
+	// TODO: Support multiple configs
+	si4463_send_config(Radio_Configuration_Data_Array);
+}
+
+void cmd_freq(const char *freq)
+{
+	int val = atoi(freq+1);
+	if(val < 256) {
+		// number 0..255: direct channel number
+		si4463_setchannel((uint8_t)val);
+	} else {
+		float f;
+		if (val > 100000) {
+			// frequency in kHz
+			f = 1000.0 * val;
+		} else {
+			// frequency in MHz
+			f = atof(freq+1) * 1000000;
+		}
+		Serial.printf("(val:%d) Setting frequency to %f MHz\n", val, 0.000001 * f);
+		si4463_setfreq(f);
+	}
+}
+
+uint8_t runconfig;
+#define RUN_RAW (1<<0)
+#define RUN_FRAME (1<<1)
+#define RUN_TELEM (1<<2)
+#define RUN_DEBUG (1<<3)
+
+void cmd_run(const char *run) {
+	run++;
+	while(*run) {
+		switch(*run) {
+		case 'r': 
+			runconfig |= RUN_RAW;
+			break;
+		case 'f': 
+			runconfig |= RUN_FRAME;
+			break;
+		case 't': 
+			runconfig |= RUN_TELEM;
+			break;
+		case 'd': 
+			runconfig |= RUN_DEBUG;
+			break;
+		}
+		run++;
+	}
+	// Start receiver
+	// use freq is set on channel => need channel 0
+	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+}
+
+void cmd_info(const char *info) {
+	info++;
+	while(*info) {
+		switch(tolower(*info)) {
+		case 'p':
+		{
+			st_partinfo pi;
+			si4463_partinfo(&pi);
+    			Serial.printf("Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
+        			pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
+			break;
+		}
+		case 's':
+		{
+			st_modemstatus status;
+			si4463_getmodemstatus(0, &status);
+			Serial.printf("Modemstatus: Pend 0x%02x Status 0x%02x RSSI: Curr %d Latch %d Ant1 %d Ant2 %d AFC Offset: %d\n",
+				status.modem_pend, status.modem_status, status.curr_rssi, status.latch_rssi,
+				status.ant1_rssi, status.ant2_rssi, status.afc_freq_offset);
+			break;
+		}
+		}
+		info++;
+	}
+}
+
+
+void handle_serial() {
+	if(!Serial.available())
+		return;
+	String msg = Serial.readStringUntil('\n');
+	const char *str = msg.c_str();
+	switch(tolower(*str)) {
+	case 'p':
+		cmd_power(str);
+		break;
+	case 'c':
+		cmd_config(str);
+		break;
+	case 'f':
+		cmd_freq(str);
+		break;
+	case 'r':
+		cmd_run(str);
+		break;
+	case 'i':
+		cmd_info(str);
+		break;
+	case '\r': case '\n':
+		// TODO STOP
+		break;
+	}
+}
 
 void loop() {
     static int blubb = 0;
@@ -313,12 +449,22 @@ void loop() {
     Serial.printf("Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
         pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
 
+    // adjust offset
+    // in config. MODEM_CLKGEN_BAND (0x51) is 0x09, ie. SY_SEL set (Npresc=2) ad BAND 1 (outdiv=6)
+#define outdiv 6
+#define Npresc 2
+    //float offset = (1<<19) * outdiv * 100000.0 / Npresc / 26000000;
+    //printf("Using offset value %f\n", offset);
+    //si4463_setfreqoffset((uint16_t)(int)3028);//-offset);
+     // in real, 10082 == 100 kHz, so 3528 is 33 khz
+
     // receive immediately on ch35 (403.5 MHz)
-    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
+    //si4463_startrx(33, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
     //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
     int last = millis();
     while(1) {
         //delay(1000);
+	handle_serial();
         delay(50);
         int n = si4463_getfifoinfo();
         if(n==0) {
