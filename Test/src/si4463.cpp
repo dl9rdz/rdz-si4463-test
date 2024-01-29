@@ -85,19 +85,45 @@ void si4463_waitcts(); // further below...
 void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int retlen);
 void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen);
 
+// This works for powering ip.  
+// Doing poweron() followed by power_up() does not. Need to check...
+void _test() {
+        uint8_t b[sizeof(buf)];
+#if 1
+        Serial.println("Starting up");
+        delay(2000);
+#endif
+        int i=0;
+        long int x=0;
+#if 1
+        {
+           
+           uint8_t res;
+           spi_sendrecv(hspi, power, sizeof(power), &res, 1);
+           Serial.printf("Power ok: %x\n", res);
+           delay(400);
+        }
+#endif
+        Serial.printf("Test done\n");
+}       
+
 void si4463_poweron() {
 	digitalWrite(SDN, LOW);
 	ctsOK = 0;
 	Serial.println("Poweron: Waiting for CTS");
 	si4463_waitcts();
 	   uint8_t res[40];
-	   delay(400);
-	   si4463_sendrecv(power, sizeof(power), res, 30);
+	   delay(2000);
+	   //si4463_sendrecv(power, sizeof(power), res, 30);
+           spi_sendrecv(hspi, power, sizeof(power), res, 1);
 	   //si4463_power_up_cmd();
 	   //si4463_power_up_cmd();
+	   //_test();
 	   Serial.printf("Power ok: %x\n", res[0]);
 	   delay(2200);
 }
+
+
 void si4463_poweroff() {
 	digitalWrite(SDN, HIGH);
 }
@@ -323,59 +349,6 @@ void si4463_writedata(uint8_t *cmd, int cmdlen)
 }
 	 
 
-#if 0
-void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int retlen)
-{
-	Serial.print("Sending: ");
-	for(int i=0; i<cmdlen; i++) { Serial.printf("%02x ", cmd[i]); }
-	Serial.println("");
-	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
-	digitalWrite(HSPI_CS, LOW);
-	spi_sendcmd(hspi, cmd, cmdlen);
-
-	// Fast commands can continue immediately, others needs to wait for CTS
-	switch (cmd[0]) {
-		case 0x44: // READ_CMD_BUFF
-		case 0x50: // FRR_A_READ
-		case 0x51: // FRR_B_READ
-		case 0x53: // FRR_C_READ
-		case 0x57: // FRR_D_READ
-		case 0x66: // WRITE_TX_FIFO
-		case 0x77: // READ_RX_FIFO
-				break;
-		default:
-		  digitalWrite(HSPI_CS, HIGH);
-		  // wait for CTS
-		  while(1) {
-			 delay(100);
-			 digitalWrite(HSPI_CS, LOW);
-			 buf[0] = 0x44; buf[1] = 0xFF;
-			 uint8_t b[2];
-			 for(int i=0; i<2; i++) {
-				 b[i] = hspi->transfer(buf[i]);
-			 }
-			 Serial.print("Sending 0x44 0xFF, getting back: ");
-			 for(int i=0; i<2; i++) {
-				Serial.printf("%02x ", b[i]);
-			 }
-			 Serial.println("");
-			 if(b[1]==0xFF) break;  // OK
-			 digitalWrite(HSPI_CS, HIGH);
-			 Serial.println("Waiting...\n");
-			 delay(500);
-		  }
-	}
-	spi_getresponse(hspi, retbuf, retlen);
-	Serial.print("Response: ");
-	for(int i=0; i<retlen; i++) {
-		Serial.printf("%02x ", retbuf[i]);
-	}
-	Serial.println("");
-	digitalWrite(HSPI_CS, HIGH);
-	hspi->endTransaction();
-}
-
-#else
 void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int retlen)
 {
 	Serial.print("sendrecv: Sending: ");
@@ -404,7 +377,6 @@ void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int
 	digitalWrite(HSPI_CS, HIGH);
 	hspi->endTransaction();
 }
-#endif
 
 // This works for powering ip.
 // Doing poweron() followed by power_up() does not. Need to check...

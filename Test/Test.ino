@@ -11,8 +11,8 @@ void setup() {
     delay(1000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
-    si4463_test();
-    //si4463_reset();  // Power-cycle the radio chip
+   // si4463_test();
+    si4463_poweron();
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
 }
 
