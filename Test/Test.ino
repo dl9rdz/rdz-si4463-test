@@ -1,19 +1,17 @@
-
-#include "src/si4463.h"
-
 #include <ctype.h>
+#include "src/si4463.h"
+#include "src/logger.h"
 
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
+int running = 1;
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);     // Just to get all log messages on the serial port :)
-
+    delay(1000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
     si4463_test();
-
     //si4463_reset();  // Power-cycle the radio chip
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
 }
@@ -21,6 +19,15 @@ void setup() {
 #define DFM_FRAMELEN 33
 
 
+void printTimestamp() {
+	uint32_t t = millis();
+
+	uint32_t s = t / 1000; t -= 1000 * s;
+	uint32_t m = s / 60; s -= 60 * m;
+	uint32_t h = m / 60; m -= 60 * h;
+	h = h % 24;
+	Serial.printf("%02d:%02d:%02d.%03d: ", h, m, s, t);
+}
 
 void printRaw(const char *label, int len, int ret, const uint8_t *data)
 {
@@ -297,9 +304,12 @@ int procbyte(uint8_t dt) {
                                 data[rxp++] = rxbyte&0xff; // (rxbyte>>1)&0xff;
                                 if(rxp>=DFM_FRAMELEN) {
                                         rxsearching = true;
-                                        Serial.printf("\nRaw [@%ld] ", millis());
-                                        for(int i=0; i<DFM_FRAMELEN; i++) { Serial.printf("%02x ", data[i]); }
-                                        Serial.println("");
+					if( logEnabled(LOG_RXRAW) ) {
+						printTimestamp();
+						Serial.print("RAW: ");
+                                        	for(int i=0; i<DFM_FRAMELEN; i++) { Serial.printf("%02x ", data[i]); }
+                                        	Serial.println("");
+					}
                                         decodeFrameDFM(data);
                                         //haveNewFrame = 1;
                                 }
@@ -324,8 +334,14 @@ void cmd_power(const char *cmd)
 	if(cmd[1]=='\r'||cmd[1]=='\n' || cmd[1]==0 || cmd[1]=='1') {
 		Serial.println("Powerup [SDN=0], patches + RF_POWER_UP SPI command");
 		si4463_poweron();
-		si4463_test();
-		si4463_power_up_cmd();
+		//si4463_test();
+		//si4463_power_up_cmd();
+
+		st_partinfo pi;
+		si4463_partinfo(&pi);
+    		Serial.printf("Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
+       			pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
+
 	}
 }
 
@@ -357,34 +373,20 @@ void cmd_freq(const char *freq)
 	}
 }
 
-uint8_t runconfig;
-#define RUN_RAW (1<<0)
-#define RUN_FRAME (1<<1)
-#define RUN_TELEM (1<<2)
-#define RUN_DEBUG (1<<3)
 
 void cmd_run(const char *run) {
-	run++;
-	while(*run) {
-		switch(*run) {
-		case 'r': 
-			runconfig |= RUN_RAW;
-			break;
-		case 'f': 
-			runconfig |= RUN_FRAME;
-			break;
-		case 't': 
-			runconfig |= RUN_TELEM;
-			break;
-		case 'd': 
-			runconfig |= RUN_DEBUG;
-			break;
-		}
-		run++;
-	}
 	// Start receiver
 	// use freq is set on channel => need channel 0
 	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+	running = 1;
+}
+
+void cmd_verb(const char *verb) {
+	int val = atoi(verb+1);
+	if(val || verb[1]=='0') {
+		logSetMask(val);
+		return;
+	}
 }
 
 void cmd_info(const char *info) {
@@ -413,6 +415,12 @@ void cmd_info(const char *info) {
 	}
 }
 
+void cmd_stop() {
+	// TODO stop the RX
+	// TODO: print some statistics
+	running = 0;
+}
+
 
 void handle_serial() {
 	if(!Serial.available())
@@ -435,18 +443,20 @@ void handle_serial() {
 	case 'i':
 		cmd_info(str);
 		break;
+	case 'v':
+		cmd_verb(str);
+		break;
 	case '\r': case '\n':
-		// TODO STOP
+		cmd_stop();
 		break;
 	}
 }
 
 void loop() {
     static int blubb = 0;
-    Serial.println("si4463 partinfo:");
     st_partinfo pi;
     int res = si4463_partinfo(&pi);
-    Serial.printf("Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
+    logPrint(LOG_INFO, "Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
         pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
 
     // adjust offset
@@ -460,12 +470,13 @@ void loop() {
 
     // receive immediately on ch35 (403.5 MHz)
     //si4463_startrx(33, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
-    //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
     int last = millis();
     while(1) {
         //delay(1000);
 	handle_serial();
         delay(50);
+	if(!running) continue;
         int n = si4463_getfifoinfo();
         if(n==0) {
             if( ((++blubb)&15) ==0) Serial.println("Empty fifo");
@@ -476,7 +487,7 @@ void loop() {
         uint8_t buf[n];
         si4463_readfifo(buf, n);
         for(int i=0; i<n; i++) {
-              Serial.printf("%02x ", buf[i]);
+            logPrint( LOG_RXDBG, "%02x ", buf[i]);
             procbyte(buf[i]);
         }
         // reset packet length, so RX will continue
@@ -486,7 +497,7 @@ void loop() {
             last = millis();
             st_modemstatus status;
             si4463_getmodemstatus(0, &status);
-            Serial.printf("RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
+            logPrint( LOG_RXDBG, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
         }
     }
     delay(20000);

@@ -1,0 +1,13 @@
+#include <inttypes.h>
+
+void logSetMask(uint16_t mask);
+void logPrint(uint16_t type, const char *format, ...);
+int logEnabled(uint16_t mask);
+
+#define LOG_RXRAW (1<<0)
+#define LOG_RXFRM (1<<1)
+#define LOG_RXTLM (1<<2)
+#define LOG_RXDBG (1<<3)
+#define LOG_RADIO (1<<4)
+#define LOG_SPI   (1<<5)
+#define LOG_INFO  (1<<6)
