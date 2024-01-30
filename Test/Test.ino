@@ -28,6 +28,10 @@ void printTimestamp() {
 	h = h % 24;
 	Serial.printf("%02d:%02d:%02d.%03d: ", h, m, s, t);
 }
+void printTimestampDelta(int diff) {
+	printTimestamp();
+	Serial.printf("(+%d.%03d)", diff/1000, (diff-diff/1000*1000));
+}
 
 void printRaw(const char *label, int len, int ret, const uint8_t *data)
 {
@@ -267,6 +271,7 @@ int procbyte(uint8_t dt) {
         static uint8_t rxp;
         static int rssi=0, fei=0, afc=0;
         static uint8_t invers = 0;
+	uint8_t bad_manchester = 0; 
         
         for(int i=0; i<8; i++) {
                 uint8_t d = (dt&0x80)?1:0;
@@ -279,23 +284,36 @@ int procbyte(uint8_t dt) {
                         // "bit2" ==> 01 or 10 => 1, otherweise => 0
                         // not here: (10=>1, 01=>0)!!! rxbyte = rxbyte ^ d;
 			if( (rxdata&3)==0 || (rxdata&3)==3 ) {  // bad manchaster 
-			     Serial.print("//");
+				bad_manchester++;
 			}
                 }
                 //
                 if(rxsearching) {
-                        //                        if( rxdata == 0x6566A5AA || rxdata == 0x9A995A55 ) {
-                        if(hammingDistance(rxdata, 0x6566A5AA)<=3 || hammingDistance(rxdata, 0x9A995A55)<=3 ) {
-                                if(rxdata==0x6566A5AA || rxdata==0x9A995A55)
-                                        Serial.printf("goodsync[0] %x");
-                                else
-                                        Serial.printf("*ERRSYNC[%d] %x", hammingDistance(rxdata, 0x6566A5AA), rxdata);
+                        int d1 = hammingDistance(rxdata, 0x6566A5AA);
+			int d2 = hammingDistance(rxdata, 0x9A995A55);
+			if(d1 <=4 || d2 <= 4) {
+				int d = d2;
+				if( d1<d ) {
+					invers = 1;
+					d = d1;
+				}
+				static int last=0;
+				int now = millis();
+				if(logEnabled(LOG_RXRAW)) printTimestampDelta(now-last);
+				last = now;
+				if(d==0)
+					logPrint(LOG_RXRAW, "SYNC[%08x/--] ", rxdata);
+				else
+					logPrint(LOG_RXRAW, "SYNC[%08x/%de] ", rxdata, d);
                                 rxsearching = false;
                                 rxbitc = 0;
                                 rxp = 0;
                                 rxbyte = 0;
+				bad_manchester = 0;
+#if 0
                                 //invers = (rxdata == 0x6566A5AA)?1:0;
                                 invers = hammingDistance(rxdata, 0x6566A5AA)<=3 ?1:0;
+#endif
                         }
                 } else {
                         rxbitc = (rxbitc+1)%16; // 16;
@@ -305,9 +323,12 @@ int procbyte(uint8_t dt) {
                                 if(rxp>=DFM_FRAMELEN) {
                                         rxsearching = true;
 					if( logEnabled(LOG_RXRAW) ) {
-						printTimestamp();
 						Serial.print("RAW: ");
-                                        	for(int i=0; i<DFM_FRAMELEN; i++) { Serial.printf("%02x ", data[i]); }
+                                        	for(int i=0; i<DFM_FRAMELEN; i++) {
+							Serial.printf("%02x ", data[i]); 
+						}
+						if(bad_manchester>0)
+							Serial.printf(" [%d inval. Manch.]", bad_manchester);
                                         	Serial.println("");
 					}
                                         decodeFrameDFM(data);
@@ -377,7 +398,7 @@ void cmd_freq(const char *freq)
 void cmd_run(const char *run) {
 	// Start receiver
 	// use freq is set on channel => need channel 0
-	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
 	running = 1;
 }
 
@@ -470,25 +491,35 @@ void loop() {
 
     // receive immediately on ch35 (403.5 MHz)
     //si4463_startrx(33, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
-    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
+    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 8, 8, 8);
     int last = millis();
+    si4463_raw_activate();
     while(1) {
         //delay(1000);
 	handle_serial();
-        delay(50);
+        delay(10);
 	if(!running) continue;
-        int n = si4463_getfifoinfo();
-        if(n==0) {
+        //int n = si4463_getfifoinfo();
+	int nraw = si4463_getrawinfo();
+        if(nraw==0) {
             if( ((++blubb)&15) ==0) Serial.println("Empty fifo");
             delay(50);
     	    //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ 32*8*2 /*len*/, 8, 8, 8);
             continue;
         }
-        uint8_t buf[n];
-        si4463_readfifo(buf, n);
+        //uint8_t buf[n];
+        uint8_t bufraw[nraw];
+        //si4463_readfifo(buf, n);
+	si4463_readraw(bufraw, nraw);
+#if 0
         for(int i=0; i<n; i++) {
             logPrint( LOG_RXDBG, "%02x ", buf[i]);
-            procbyte(buf[i]);
+            //procbyte(buf[i]);
+        }
+#endif
+        for(int i=0; i<nraw; i++) {
+            logPrint( LOG_RXRAW, "%02x ", bufraw[i]);
+            procbyte(bufraw[i]);
         }
         // reset packet length, so RX will continue
         //si4463_startrx(35, 0, 66/*len*/, 0, 0, 0);

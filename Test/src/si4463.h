@@ -43,4 +43,10 @@ int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t n
 int si4463_getfifoinfo();
 int si4463_readfifo(uint8_t *buf, int len);
 
+// Maybe make similar to fifo, i.e. getirqfifo, readirqfifo?
+void si4463_raw_activate();
+int si4463_readdata();
+
+int si4463_getrawinfo();
+int si4463_readraw(uint8_t *buf, int len);
 

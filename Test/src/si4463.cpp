@@ -107,6 +107,10 @@ void _test() {
         Serial.printf("Test done\n");
 }       
 
+// Important note on powerup sequence:
+// https://community.silabs.com/s/article/si4x6x-c2a-si4x55-c2a-startup-sequence
+// First SPI transaction after SDN low has to finish in less than 4ms.
+// (The waitcts is a SPI transaction...)
 void si4463_poweron() {
 	digitalWrite(SDN, LOW);
 	ctsOK = 0;
@@ -160,8 +164,8 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 	}
 
 	// Send command
-	Serial.print("Sending: ");
-	for(int i=0; i<cmdlen; i++) { Serial.printf("%02x ", cmd[i]); }
+	logPrint(LOG_RXDBG, "Sending: ");
+	for(int i=0; i<cmdlen; i++) { logPrint(LOG_RXDBG, "%02x ", cmd[i]); }
 	digitalWrite(HSPI_CS, LOW);
 	spi_sendcmd(hspi, cmd, cmdlen);
 	digitalWrite(HSPI_CS, HIGH);
@@ -173,12 +177,12 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 		hspi->transfer(0x44);   // read CMD buffer
 		ctsval = hspi->transfer(DUMMY);
 		if(ctsval==0xFF) { 
-			Serial.print(" [CTS OK] ");
+			logPrint(LOG_RXDBG, " [CTS OK] ");
 			if(resplen>0) {
-				Serial.printf("Response (%d bytes): ", resplen);
+				logPrint(LOG_RXDBG, "Response (%d bytes): ", resplen);
 				spi_getresponse(hspi, resp, resplen);
-				for(int i=0; i<resplen; i++) { Serial.printf("%02X ", resp[i]); }
-				Serial.println("");
+				for(int i=0; i<resplen; i++) { logPrint(LOG_RXDBG, "%02X ", resp[i]); }
+				logPrint( LOG_RXDBG, "\n");
 			}
 			digitalWrite(HSPI_CS, HIGH);
 			break;
@@ -186,7 +190,7 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 		digitalWrite(HSPI_CS, HIGH);
 		// TODO: Maybe add timeout and error
 		delay(100);
-		Serial.println("CTSWAIT");
+		logPrint( LOG_RXDBG, "CTSWAIT\n");
 	}
 	if(ctsval==0xff) {  // should always be the case!
 		ctsOK = 1;
@@ -252,6 +256,23 @@ int si4463_setfreqoffset(uint16_t offset) {
 // OUTDIV: The sample config uses MODEM_CLKGEN_BAND = 0x09 (FORCE_SY_RECAL=0, SY_SEL_1, BAND=1 == FVCO_DIV_6)
 // However, the data sheet(https://www.silabs.com/documents/public/data-sheets/Si4463-61-60-C.pdf) page 31 says
 // outdiv = 10 for 350..420 MHz. Seems that outdiv=10 is right.
+//
+// see API document at http://www.silabs.com/documents/public/application-notes/EZRadioPRO_REVC2_API.zip
+//
+// Comment from silabs:
+// The error is in the API document, probably because that list was taken from the REVB1 API without
+// applying the change of REVC2. Sorry for the inconvenience.
+//
+// The correct list is
+// FVCO_DIV_4 0 Output is FVCO/4.
+// FVCO_DIV_10 1 Output is FVCO/10.
+// FVCO_DIV_8 2 Output is FVCO/8.
+// FVCO_DIV_12 3 Output is FVCO/12.
+// FVCO_DIV_16 4 Output is FVCO/16.
+// FVCO_DIV_24 5 Output is FVCO/24.
+// FVCO_DIV_24_2 6 Output is FVCO/24.
+// FVCO_DIV_24_3 7 Output is FVCO/24.
+
 #define OUTDIV 10
 #define NPRES 2
 #define FREQOSC 26000000
@@ -448,7 +469,7 @@ int si4463_readfifo(uint8_t *buf, int len) {
 	spi_getresponse(hspi, buf, len);
 	digitalWrite(HSPI_CS, HIGH);
 	hspi->endTransaction();
-	return 0;
+	return len;
 }
 
 int si4463_get_int_status() {
@@ -483,4 +504,59 @@ int si4463_getmodemstatus(uint8_t clearpend, st_modemstatus *status) {
 	status->afc_freq_offset = swaps(status->afc_freq_offset);
 	return 0;
 }
+
+#define DATA_PIN 3
+#define CLOCK_PIN 16
+#define BUFFER_SIZE 128
+uint8_t buffer[BUFFER_SIZE];
+int bufferHead = 0, bufferTail = 0;
+
+static void IRAM_ATTR onClockRisingEdge() {
+	static int bit_count = 0;
+	buffer[bufferHead] = (buffer[bufferHead] << 1) | digitalRead(DATA_PIN);
+	bit_count++;
+	if(bit_count >= 8) {
+		bufferHead = (bufferHead + 1) % BUFFER_SIZE;
+		bit_count = 0;
+	}
+}
+
+// number of bytes available for reading in buffer
+int si4463_getrawinfo() {
+	return (bufferHead - bufferTail + BUFFER_SIZE) % BUFFER_SIZE;
+}
+int si4463_readraw(uint8_t *buf, int len) {
+	for(int i=0; i<len; i++) {
+		if( bufferHead == bufferTail)
+			return -1;  // not enough data -- maybe return number of actually read bytes?
+		buf[i] = buffer[bufferTail];
+		bufferTail = (bufferTail + 1) % BUFFER_SIZE;
+	}
+	return len;
+}
+
+
+// returns byte if there is a new byte, -1 otherwise
+int si4463_readdata() {
+	if (bufferHead == bufferTail)
+		return -1;
+	uint8_t receivedByte = buffer[bufferTail];
+	bufferTail = (bufferTail + 1) % BUFFER_SIZE;
+	return receivedByte;
+}
+
+
+// activate IRQ handler for raw mode
+void si4463_raw_activate() {
+	// ESP CONFIG
+	pinMode(CLOCK_PIN, INPUT);
+	pinMode(DATA_PIN, INPUT);
+	attachInterrupt(digitalPinToInterrupt(CLOCK_PIN), onClockRisingEdge, RISING);
+	
+	// Si4463 config  0x11(17): RX DATA CLK;   0x14(20) RX_DATA  // that is already in the default config
+	uint8_t pincfg[] = { 0x13, 0x11, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        si4463_sendrecv( pincfg, 8, (uint8_t *)0, 0);
+}
+
+
 
