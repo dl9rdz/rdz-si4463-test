@@ -8,29 +8,28 @@ int running = 1;
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);     // Just to get all log messages on the serial port :)
+    delay(2000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
-   // si4463_test();
-    si4463_poweron();
+    // si4463_poweron();
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
 }
 
 #define DFM_FRAMELEN 33
 
-
-void printTimestamp() {
+void printTimestamp(uint16_t log_level, uint32_t *last) {
 	uint32_t t = millis();
 
 	uint32_t s = t / 1000; t -= 1000 * s;
 	uint32_t m = s / 60; s -= 60 * m;
 	uint32_t h = m / 60; m -= 60 * h;
 	h = h % 24;
-	Serial.printf("%02d:%02d:%02d.%03d: ", h, m, s, t);
-}
-void printTimestampDelta(int diff) {
-	printTimestamp();
-	Serial.printf("(+%d.%03d)", diff/1000, (diff-diff/1000*1000));
+	logPrint(log_level, "%02d:%02d:%02d.%03d: ", h, m, s, t);
+	if(last) {
+		uint32_t diff = t - *last;
+		*last = t;
+		logPrint(log_level, "(+%d.%03d)", diff/1000, (diff-diff/1000*1000));
+	}
 }
 
 void printRaw(const char *label, int len, int ret, const uint8_t *data)
@@ -297,10 +296,8 @@ int procbyte(uint8_t dt) {
 					invers = 1;
 					d = d1;
 				}
-				static int last=0;
-				int now = millis();
-				if(logEnabled(LOG_RXRAW)) printTimestampDelta(now-last);
-				last = now;
+				static uint32_t last=0;
+				if(logEnabled(LOG_RXRAW)) printTimestamp(LOG_RXRAW, &last);
 				if(d==0)
 					logPrint(LOG_RXRAW, "SYNC[%08x/--] ", rxdata);
 				else

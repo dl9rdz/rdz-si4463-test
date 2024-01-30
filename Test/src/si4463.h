@@ -26,7 +26,6 @@ void si4463_poweron();
 void si4463_poweroff();
 void si4463_reset();
 
-int si4463_power_up_cmd();
 int si4463_send_config(uint8_t *initdata);
 int si4463_configure();
 

@@ -8,67 +8,92 @@
 //#include "radio_config_Si4463_dfm.h"
 //#include "radio_config_Si4463_rs41.h"
 
+// SPI Interface
 #define HSPI_SCLK 12
 #define HSPI_MISO 13
 #define HSPI_MOSI 11
 #define HSPI_CS 10
+
+// Shutdown pin of Si4463
 #define SDN 1
 
-uint8_t buf[] = { 0x13, 0x00, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t power[] = { 0x02, 0x01, 0x00, 0x01, 0xc9, 0xc3, 0x80  };
-uint8_t partinfo[] = { 0x01 };
+// Clock and data for Si4463
+// (we assume CLK is on Si4463's GPIO0 and data on GPIO1 -- hardcoded in GPIO_PIN_CFG register)
+#define DATA_PIN 3
+#define CLOCK_PIN 16
+
+
+static uint8_t buf[] = { 0x13, 0x00, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
+static uint8_t power[] = { 0x02, 0x01, 0x00, 0x01, 0xc9, 0xc3, 0x80  };
+static uint8_t partinfo[] = { 0x01 };
 
 uint8_t Radio_Configuration_Data_Array[] = RADIO_CONFIGURATION_DATA_ARRAY;
 uint8_t Radio_Patches_Powerup_Array[] = RADIO_PATCHES_POWERUP_ARRAY;
 
 
-SPIClass *hspi;
+// Initialized by si4463_init()
+static SPIClass *hspi;
 
 
 /******************************************************************************
- * Low-level SPI functions
+ * Low-level SPI functions and initialization
+ * These function assume that the caller locks and unlocks the SPI bus
+ * (beginTransaction / endTransaction
  ******************************************************************************/
 
-#define DUMMY 0xFF
+// Send a SPI message of some length
+static void spi_sendcmd(const uint8_t *buf, int len) {
+	for(int i=0; i<len; i++) {
+		hspi->transfer(buf[i]);
+	}
+}
 
-void spi_getresponse(SPIClass *hspi, uint8_t *buf, int len) {
-	//Serial.print("spi_getreponse: ");
+// Read a SPI response of some length
+#define DUMMY 0xFF
+static void spi_getresponse(uint8_t *buf, int len) {
 	for(int i=0; i<len; i++) {
 		buf[i] = hspi->transfer(DUMMY);
-		//Serial.printf("%02x ", buf[i]);
 	}
-	//Serial.println("");
 }
 
-void spi_sendcmd(SPIClass *hspi, const uint8_t *buf, int len) {
-	//Serial.print("spi_sendcmd: ");
-	uint8_t dummy[len];
-	for(int i=0; i<len; i++) {
-		dummy[len] = hspi->transfer(buf[i]);
-		//Serial.printf("%02x>%02x ", buf[i], dummy[i]);
+// Read a SPI response of some length, waitign for CTS if waitcts is true
+static int spi_receive(int waitcts, uint8_t *retbuf, int retlen)
+{
+	if(waitcts==0 && retlen==0)
+		return 0;
+
+	digitalWrite(HSPI_CS, LOW);
+	if(waitcts) {
+		// TODO: Add timeout
+		while(1) {
+			printf("Waiting for CTS");
+			hspi->transfer(0x44);
+			uint8_t cts = hspi->transfer(DUMMY);
+			// If we don't get CTS (0xFF) back, we need to release CS and try again after some time
+			// If we get CTS, we have to keep CS active (low) and read the data
+			if(cts==0xFF) break;  // OK
+
+			digitalWrite(HSPI_CS, HIGH);
+			// TODO iteration count & timeout
+			Serial.println("Waiting...\n");
+			delay(1);
+			digitalWrite(HSPI_CS, LOW);
+		}
 	}
-	//Serial.println();
+	if(retlen>0) {
+		spi_getresponse(retbuf, retlen);
+		Serial.printf("Response: (retlen=%d)\n", retlen);
+		for(int i=0; i<retlen; i++) {
+			Serial.printf("%02x ", retbuf[i]);
+		}
+	}
+	digitalWrite(HSPI_CS, HIGH);
+	Serial.println("---");
+	return 0;
 }
 
-
-// Radio chip functions
-static uint8_t ctsOK = 0;
-
+// Initialize library 
 void si4463_init() {
-	//test
-#if 0
-	for(int i=0; i<100; i++){
- 	int p = 10 + (i&3);
-		pinMode(p, OUTPUT);
-		digitalWrite(p, HIGH);
- 	delay(1000);
-		digitalWrite(p, LOW);
- 	delay(1000);
-	}
-#endif
-
-	delay(2000); // Make sure serial terminal is ready
-	// Init library
 	logPrint(LOG_SPI, "si4463_init: Initializing SPI bus\n");
 	hspi = new SPIClass(HSPI);
 	hspi->begin(HSPI_SCLK, HSPI_MISO, HSPI_MOSI, -1); //SCLK, MISO, MOSI, SS
@@ -80,75 +105,51 @@ void si4463_init() {
 	pinMode(SDN, OUTPUT);  // CnS
 }
 
-void si4463_waitcts(); // further below...
+/******************************************************************************
+ * Internal SPI functions for Si4463
+ * These lock the SPI bus (beginTransaction) before calling any SPI function above
+ ******************************************************************************/
 
-void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int retlen);
-void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen);
+// TODO: This still needs some cleanup...
 
-// This works for powering ip.  
-// Doing poweron() followed by power_up() does not. Need to check...
-void _test() {
-        uint8_t b[sizeof(buf)];
-#if 1
-        Serial.println("Starting up");
-        delay(2000);
-#endif
-        int i=0;
-        long int x=0;
-#if 1
-        {
-           
-           uint8_t res;
-           spi_sendrecv(hspi, power, sizeof(power), &res, 1);
-           Serial.printf("Power ok: %x\n", res);
-           delay(400);
-        }
-#endif
-        Serial.printf("Test done\n");
-}       
-
-// Important note on powerup sequence:
-// https://community.silabs.com/s/article/si4x6x-c2a-si4x55-c2a-startup-sequence
-// First SPI transaction after SDN low has to finish in less than 4ms.
-// (The waitcts is a SPI transaction...)
-void si4463_poweron() {
-	digitalWrite(SDN, LOW);
-	ctsOK = 0;
-	Serial.println("Poweron: Waiting for CTS");
-	si4463_waitcts();
-	   uint8_t res[40];
-	   delay(2000);
-	   //si4463_sendrecv(power, sizeof(power), res, 30);
-           spi_sendrecv(hspi, power, sizeof(power), res, 1);
-	   //si4463_power_up_cmd();
-	   //si4463_power_up_cmd();
-	   //_test();
-	   Serial.printf("Power ok: %x\n", res[0]);
-	   delay(2200);
+/* wait for CTS (if waitcts is set), then read response */
+int si4463_receive(int waitcts, uint8_t *retbuf, int retlen)
+{
+	Serial.printf("receive (%d, %d) called\n", waitcts, retlen);
+	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
+	int retval = spi_receive(waitcts, retbuf, retlen);
+	hspi->endTransaction();
+	return retval;
 }
 
 
-void si4463_poweroff() {
-	digitalWrite(SDN, HIGH);
+void si4463_waitcts() {
+	Serial.println("waitcts called");
+	si4463_receive(1, (uint8_t*)0, 0);
+}	
+
+// This is not used???
+int si4463_sendcommand(uint8_t *cmd, int cmdlen)
+{
+	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
+	digitalWrite(HSPI_CS, LOW);
+	spi_sendcmd(cmd, cmdlen);
+	digitalWrite(HSPI_CS, HIGH);
+	hspi->endTransaction();
+	return 0;
 }
 
-
-void si4463_reset() {
-	Serial.println("Si4463 power off/on reset");
-	digitalWrite(SDN, HIGH);
-	delay(500);
-	digitalWrite(SDN, LOW);
-	delay(500);
-	ctsOK = 0;  // need to wait for CTS
-// as in test:::
-	   delay(100);
-	   si4463_waitcts();
-}
 
 void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen) {
 	uint8_t ctsval;
 	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
 
+#if 0
+	// let's not use that?
+	// usually sendrecv waits until CTS a the end anyway, so we could also manually wait for CTS?
+	// unless we have some case for waiting?
+	// But this code is bad, as it does not pull CS HIGH before sending the next command.
+	// If really needed we could ccall waitcts()
 	while(!ctsOK) {
 		printf("si4463_sendrecv: Waiting for CTS");
 		digitalWrite(HSPI_CS, LOW);
@@ -162,12 +163,13 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 		Serial.println("Waiting...\n");
 		delay(500);  // should be shorter
 	}
+#endif
 
 	// Send command
 	logPrint(LOG_RXDBG, "Sending: ");
 	for(int i=0; i<cmdlen; i++) { logPrint(LOG_RXDBG, "%02x ", cmd[i]); }
 	digitalWrite(HSPI_CS, LOW);
-	spi_sendcmd(hspi, cmd, cmdlen);
+	spi_sendcmd(cmd, cmdlen);
 	digitalWrite(HSPI_CS, HIGH);
 
 	// min 80 ns
@@ -180,7 +182,7 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 			logPrint(LOG_RXDBG, " [CTS OK] ");
 			if(resplen>0) {
 				logPrint(LOG_RXDBG, "Response (%d bytes): ", resplen);
-				spi_getresponse(hspi, resp, resplen);
+				spi_getresponse(resp, resplen);
 				for(int i=0; i<resplen; i++) { logPrint(LOG_RXDBG, "%02X ", resp[i]); }
 				logPrint( LOG_RXDBG, "\n");
 			}
@@ -193,10 +195,85 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 		logPrint( LOG_RXDBG, "CTSWAIT\n");
 	}
 	if(ctsval==0xff) {  // should always be the case!
-		ctsOK = 1;
+		//ctsOK = 1;
 	}
 	hspi->endTransaction();
 }
+
+
+// Send patches (created using WDS) and RF_POWER_UP command
+// Timing is important, so let's do this automatically as part of poweron()
+int si4463_power_up_cmd() {
+	uint8_t *initdata = Radio_Patches_Powerup_Array;
+	return si4463_send_config(initdata);
+}
+
+  
+/******************************************************************************
+ * Public API functions
+ ******************************************************************************/
+// Important note on powerup sequence:
+// https://community.silabs.com/s/article/si4x6x-c2a-si4x55-c2a-startup-sequence
+// First SPI transaction after SDN low has to finish in less than 14ms.
+// (The waitcts is a SPI transaction...)
+// see also https://www.silabs.com/documents/public/application-notes/AN633.pdf
+// (AN633 Rev 0.9)
+
+#define USEPATCHES 1
+
+void si4463_poweron() {
+	Serial.println("Poweron: Waiting for CTS");
+	digitalWrite(SDN, LOW);
+
+	// AN633v0.9, p.25: After pulling SDN low, POR takes a maximum of 6ms
+	// same page, a few lines below, and also next page: Wait 14 ms
+	delay(14);
+
+	// AN633v0.9: Then make sure to send a SPI transaction in less than 4ms
+	// counted from falling NSEL to rising NSEL edge.
+	// Could do a power command directly, but lets do a CTS poll for now.
+	si4463_waitcts();
+
+	uint8_t res[40];
+	// So let's send the power on command
+#if USEPATCHES
+	si4463_power_up_cmd();
+#else
+	si4463_sendrecv(power, sizeof(power), res, 0);
+#endif
+
+
+	// So let's wait for CTS...
+	si4463_waitcts();
+
+	// This is working??
+        //spi_sendrecv(power, sizeof(power), res, 1);
+
+	//Serial.printf("Power ok: %x\n", res[0]);
+	//delay(2200);
+}
+
+void si4463_poweroff() {
+	digitalWrite(SDN, HIGH);
+}
+
+
+void si4463_reset() {
+	si4463_poweroff();
+	delay(1);
+	si4463_poweron();
+#if 0
+	Serial.println("Si4463 power off/on reset");
+	digitalWrite(SDN, HIGH);
+	delay(500);
+	digitalWrite(SDN, LOW);
+	delay(500);
+	ctsOK = 0;  // need to wait for CTS
+	delay(100);
+	si4463_waitcts();
+#endif
+}
+
 
 
 /*******************************************************************************
@@ -219,19 +296,13 @@ int si4463_send_config(uint8_t *initdata) {
 	}
 	return 0;
 }
+
 // Send all configuration commands from Radio_Configuration_Data_Array
 // (created using Wireless Development Suite)
 int si4463_configure() {
 	uint8_t *initdata = Radio_Configuration_Data_Array;
 	return si4463_send_config(initdata);
 }
-
-// Send patches (created using WDS) and RF_POWER_UP command
-int si4463_power_up_cmd() {
-	uint8_t *initdata = Radio_Patches_Powerup_Array;
-	return si4463_send_config(initdata);
-}
-  
 
 float basefreq = 400000000;   // TODO: set via config
 float chanstep = 100000;      // TODO: set via config
@@ -311,135 +382,7 @@ int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t n
 }
 
 
-int spi_receive(int waitcts, uint8_t *retbuf, int retlen)
-{
-	uint8_t buf[2];
-
-	digitalWrite(HSPI_CS, LOW);
-	if(waitcts) {
-		while(1) {
-			printf("Waiting for CTS");
-			hspi->transfer(0x44);
-			uint8_t cts= hspi->transfer(DUMMY);
-			if(cts==0xFF) break;  // OK
-
-			digitalWrite(HSPI_CS, HIGH);
-			Serial.println("Waiting...\n");
-			delay(50);  // should be shorter
-			digitalWrite(HSPI_CS, LOW);
-		}
-	}
-	if(retlen>0) {
-		spi_getresponse(hspi, retbuf, retlen);
-		Serial.printf("Response: (retlen=%d)\n", retlen);
-		for(int i=0; i<retlen; i++) {
-			Serial.printf("%02x ", retbuf[i]);
-		}
-	}
-	digitalWrite(HSPI_CS, HIGH);
-	Serial.println("---");
-	return 0;
-}
-
-
-
-// "Public API" -> these do SPI transaction (the others assume to be within one?) 
-
-/* wait for CTS (if waitcts is set), then read response */
-int si4463_receive(int waitcts, uint8_t *retbuf, int retlen)
-{
-	Serial.printf("receive (%d, %d) called\n", waitcts, retlen);
-	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
-	int retval = spi_receive(waitcts, retbuf, retlen);
-	hspi->endTransaction();
-	return retval;
-}
-
-void si4463_waitcts() {
-	Serial.println("waitcts called");
-	si4463_receive(1, (uint8_t*)0, 0);
-}	
-
-void si4463_writedata(uint8_t *cmd, int cmdlen)
-{
-	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
-	digitalWrite(HSPI_CS, LOW);
-	spi_sendcmd(hspi, cmd, cmdlen);
-	digitalWrite(HSPI_CS, HIGH);
-	hspi->endTransaction();
-}
-	 
-
-void spi_sendrecv(SPIClass *hspi, uint8_t *cmd, int cmdlen, uint8_t *retbuf, int retlen)
-{
-	Serial.print("sendrecv: Sending: ");
-	for(int i=0; i<cmdlen; i++) { Serial.printf("%02x ", cmd[i]); }
-	Serial.println("");
-	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
-	digitalWrite(HSPI_CS, LOW);
-	spi_sendcmd(hspi, cmd, cmdlen);
-
-	// Fast commands can continue immediately, others needs to wait for CTS
-	int waitcts = 1;
-	switch (cmd[0]) {
-		case 0x44: // READ_CMD_BUFF
-		case 0x50: // FRR_A_READ
-		case 0x51: // FRR_B_READ
-		case 0x53: // FRR_C_READ
-		case 0x57: // FRR_D_READ
-		case 0x66: // WRITE_TX_FIFO
-		case 0x77: // READ_RX_FIFO
-			waitcts = 0;
-			break;
-	}
-	Serial.printf("receiving, waitcts=%d\n", waitcts);
-	spi_receive(waitcts, retbuf, retlen);
-	Serial.println("");
-	digitalWrite(HSPI_CS, HIGH);
-	hspi->endTransaction();
-}
-
-// This works for powering ip.
-// Doing poweron() followed by power_up() does not. Need to check...
-void si4463_test() {
-	digitalWrite(HSPI_CS, HIGH);
-	digitalWrite(SDN, LOW);
-	pinMode(HSPI_CS, OUTPUT);  // CnS
-	pinMode(SDN, OUTPUT);  // CnS
-
-	uint8_t b[sizeof(buf)];
-	Serial.println("Starting up");
-	delay(2000);
-	int i=0;
-	long int x=0;
-	{
-	   Serial.println("Poweroff for 2s");
-	   si4463_poweroff();
-
-	   Serial.println("Poweron");
-	   si4463_poweron();
-	   delay(100);
-	   si4463_waitcts();
-	   delay(2000);
-
-	   uint8_t res;
-	   spi_sendrecv(hspi, power, sizeof(power), &res, 1);
-	   Serial.printf("Power ok: %x\n", res);
-	   delay(400);
-
-	   //uint8_t rbuf[10];
-	   uint8_t rbuf[10];
-	   spi_sendrecv(hspi, partinfo, 1, rbuf, 9);
-
-	Serial.println("si4463 partinfo:");
-	st_partinfo pi;
-	res = si4463_partinfo(&pi);
-
-	}
-	Serial.printf("Test done\n");
-}
-
-unsigned short swaps( unsigned short val)
+static unsigned short swaps( unsigned short val)
 {
 	return ((val & 0xff) << 8) | ((val & 0xff00) >> 8);
 }
@@ -466,7 +409,7 @@ int si4463_readfifo(uint8_t *buf, int len) {
 	hspi->beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
 	digitalWrite(HSPI_CS, LOW);
 	hspi->transfer(0x77);
-	spi_getresponse(hspi, buf, len);
+	spi_getresponse(buf, len);
 	digitalWrite(HSPI_CS, HIGH);
 	hspi->endTransaction();
 	return len;
@@ -505,8 +448,6 @@ int si4463_getmodemstatus(uint8_t clearpend, st_modemstatus *status) {
 	return 0;
 }
 
-#define DATA_PIN 3
-#define CLOCK_PIN 16
 #define BUFFER_SIZE 128
 uint8_t buffer[BUFFER_SIZE];
 int bufferHead = 0, bufferTail = 0;
