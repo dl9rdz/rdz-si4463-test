@@ -4,8 +4,8 @@
 
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
-int running = 1;
-float freq = 400000000;  // Freq in Hz.
+int running = 0;
+float freq = 403500000;  // Freq in Hz.
 
 typedef struct st_rxstat {
 	uint32_t start;
@@ -23,9 +23,13 @@ void setup() {
     delay(4000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
-    // si4463_poweron();
     si4463_configure();   // Send all configuration stuff from  Wireless Development Suite
+    si4463_setfreq(freq);
 }
+
+
+
+/// Some partial DFM frame decoder functions
 
 #define DFM_FRAMELEN 33
 
@@ -47,7 +51,6 @@ void printTimestamp(uint16_t log_level, uint32_t *last) {
 
 void printRaw(const char *label, int len, int ret, const uint8_t *data)
 {
-	//logPrint( LOG_RXFRM, "%s(%d): ", label, ret);
 	logPrint( LOG_RXFRM, "%s:", label);
         int i;
         for(i=0; i<len/2; i++) {
@@ -62,7 +65,7 @@ void decodeDAT(uint8_t *dat)
 {
         logPrint( LOG_RXTLM, " DAT[%d]: ", dat[6]);
 
-        // We handle this case already here, because we need to update dfmstate.datesec before the cycle complete handling 
+        // (We handle this case already here, because we need to update dfmstate.datesec before the cycle complete handling) in rdzSonde
         if( dat[6]==8 ) {
                 int y = (dat[0]<<4) + (dat[1]>>4);
                 int m = dat[1]&0x0F;
@@ -132,7 +135,6 @@ void decodeCFG(uint8_t *cfg)
         uint8_t block_conf[ 7*S];  //  7*4=28
         uint8_t block_dat1[13*S];  // 13*4=52
         uint8_t block_dat2[13*S];
-
 
 // Error correction for hamming code
         uint8_t H[4][8] =  // extended Hamming(8,4) particy check matrix
@@ -236,7 +238,6 @@ int decodeFrameDFM(uint8_t *data) {
         int ret0 = hamming(hamming_conf,  7, block_conf);
         int ret1 = hamming(hamming_dat1, 13, block_dat1);
         int ret2 = hamming(hamming_dat2, 13, block_dat2);
-        //Serial.printf("Hamming returns %d %d %d -- %d\n", ret0, ret1, ret2, ret0|ret1|ret2);
 	if(ret0<0) rxstat.hamerr++; else rxstat.hamcor += ret0;
 	if(ret1<0) rxstat.hamerr++; else rxstat.hamcor += ret1;
 	if(ret2<0) rxstat.hamerr++; else rxstat.hamcor += ret2;
@@ -248,7 +249,7 @@ int decodeFrameDFM(uint8_t *data) {
 
 	static uint32_t lastFrm = 0;
 	printTimestamp( LOG_RXFRM, &lastFrm );
-#define HSTAT(d) (d<0?'E':d+'0')
+#define HSTAT(d) (d<0?'E' : (d<10?(d+'0'):d+'A'-10))
 	logPrint( LOG_RXFRM, "HAM(%c/%c/%c) ", HSTAT(ret0), HSTAT(ret1), HSTAT(ret2));
         printRaw("CFG", 7, ret0, byte_conf);
         printRaw("DAT", 13, ret1, byte_dat1);
@@ -343,7 +344,6 @@ int procbyte(uint8_t dt) {
                                         decodeFrameDFM(data);
 					rxstat.framecnt++;
 					rxstat.manerr += bad_manchester;
-                                        //haveNewFrame = 1;
                                 }
                         }
                 }
@@ -368,8 +368,6 @@ void cmd_power(const char *cmd)
 	if(cmd[1]=='\r'||cmd[1]=='\n' || cmd[1]==0 || cmd[1]=='1') {
 		Serial.println("Powerup [SDN=0], patches + RF_POWER_UP SPI command");
 		si4463_poweron();
-		//si4463_test();
-		//si4463_power_up_cmd();
 		running = 0;
 
 		st_partinfo pi;
@@ -396,6 +394,7 @@ void cmd_freq(const char *freqstr)
 {
 	int val = atoi(freqstr+1);
 	if (val < 100) {
+		// Shortcut, nn for 40n.n MHz
 		freq = 400000000 + val * 100000;
 	} else if (val > 100000) {
 		// frequency in kHz
@@ -425,7 +424,6 @@ void cmd_stop() {
 	uint32_t diff = stop - rxstat.start;
 	logPrint( LOG_INFO, "Stop t(run)=%d.%ds RX: %d frames, %d sync biterr, %d bad machester Hamming: %d corrected, %d fail\n", diff/1000, diff-(diff/1000*1000), rxstat.framecnt,
 		rxstat.syncerr, rxstat.manerr, rxstat.hamcor, rxstat.hamerr );	
-	// TODO: print some statistics
 	// TODO stop the RX
 	running = 0;
 }
@@ -521,7 +519,7 @@ void loop() {
     logPrint(LOG_INFO, "Partinfo: Chip %x, part %x, pbuild %x, id %x, customer %x, romid %x\n",
         pi.chiprev, pi.part, pi.pbuild, pi.id, pi.customer, pi.romid);
 
-    // adjust offset
+    // adjust offset -- currenlty unused code
     // in config. MODEM_CLKGEN_BAND (0x51) is 0x09, ie. SY_SEL set (Npresc=2) ad BAND 1 (outdiv=6)
 #define outdiv 10
 #define Npresc 2
@@ -532,7 +530,8 @@ void loop() {
 
     // receive immediately on ch35 (403.5 MHz)
     //si4463_startrx(33, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
-    si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 8, 8, 8);
+    //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 8, 8, 8);
+    si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
     int last = millis();
     si4463_raw_activate();
     while(1) {
@@ -540,7 +539,7 @@ void loop() {
 	handle_serial();
         delay(10);
 	if(!running) continue;
-        //int n = si4463_getfifoinfo();
+        //int n = si4463_getfifoinfo(); // was for FIFO direct mode
 	int nraw = si4463_getrawinfo();
         if(nraw==0) {
             if( ((++blubb)&15) ==0) Serial.println("Empty fifo");
@@ -550,7 +549,7 @@ void loop() {
         }
         //uint8_t buf[n];
         uint8_t bufraw[nraw];
-        //si4463_readfifo(buf, n);
+        //si4463_readfifo(buf, n);   // was for FIFO direct mode
 	si4463_readraw(bufraw, nraw);
 #if 0
         for(int i=0; i<n; i++) {
@@ -572,5 +571,5 @@ void loop() {
             logPrint( LOG_RXSTAT, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
         }
     }
-    delay(20000);
+    // will never leave. good enough for now.
 }
