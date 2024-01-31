@@ -351,7 +351,7 @@ void si4463_setfreq(float f) {
 	int intpart = (int)plldiv - 1;
 	plldiv = plldiv - intpart;
 	uint32_t frac = (uint32_t)((float)(1<<19) * plldiv);
-	logPrint( LOG_RADIO, "si4463_setfreq: Frequency %f => PLL divior inte=%d, fraq=%d\n", f, intpart, frac);
+	logPrint( LOG_RADIO, "si4463_setfreq: Frequency %f => PLL divisor inte=%d, fraq=%d\n", f, intpart, frac);
 	// set property group 0x40 index 0x00
 	uint8_t buf[] = { 0x11, 0x40, 4, 0, (uint8_t)intpart, (uint8_t)(frac>>16), (uint8_t)(frac>>8), (uint8_t)frac };
 	si4463_sendrecv(buf, 8, (uint8_t *)0, 0);
@@ -364,6 +364,7 @@ void si4463_setfreq(float f) {
  * next state: 0: remain or better 8: RX (re-arm for new packet)
  * next states: next1 on preamble timeout, next2 on valid packet received, next3 on invalid packet received
  */
+void si4463_clearfifo();
 int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t next1, uint8_t next2, uint8_t next3)
 {
 	logPrint( LOG_RADIO, "si4463_startrx()\n" );
@@ -377,6 +378,7 @@ int si4463_startrx(uint8_t channel, uint8_t condition, uint16_t rxlen, uint8_t n
 	buf[6] = next2;
 	buf[7] = next3;
 	si4463_sendrecv(buf, 8, (uint8_t *)0, 0);
+	si4463_clearfifo(); // remove old data
 	return 0;
 }
 
@@ -498,5 +500,7 @@ void si4463_raw_activate() {
         si4463_sendrecv( pincfg, 8, (uint8_t *)0, 0);
 }
 
-
+void si4463_clearfifo() {
+	bufferHead = bufferTail = 0;
+}
 

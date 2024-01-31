@@ -31,6 +31,9 @@ void logSetMask(uint16_t mask) {
 	logmask = mask;
 	Serial.printf("Logmask set to %0x\n", mask);
 }
+uint16_t logGetMask() {
+	return logmask;
+}
 
 int logEnabled(uint16_t type) {
 	return !!(logmask & type);

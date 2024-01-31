@@ -3,6 +3,7 @@
 void logPrint(uint16_t type, const char *format, ...);
 
 void logSetMask(uint16_t mask);
+uint16_t logGetMask();
 int logEnabled(uint16_t mask);
 
 void logSetColor(uint8_t onoff);

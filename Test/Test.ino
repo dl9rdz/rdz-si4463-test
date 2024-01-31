@@ -69,18 +69,18 @@ void decodeDAT(uint8_t *dat)
                 int d = dat[2]>>3;
                 int h = ((dat[2]&0x07)<<2) + (dat[3]>>6);
                 int mi = (dat[3]&0x3F);
-                logPrint( LOG_RXTLM, "Date: %04d-%02d-%02d %02d:%02dz ", y, m, d, h, mi);
+                logPrint( LOG_RXTLM, "Date: %04d-%02d-%02d %02d:%02dz       ", y, m, d, h, mi);
         }
         else if( dat[6]>8 ) return; // we ignore those...
 
         switch(dat[6]) {
         case 0:
-                logPrint( LOG_RXTLM, "Packet counter: %d", dat[3]); 
+                logPrint( LOG_RXTLM, "Packet counter: %-5d         ", dat[3]); 
                 break;
         case 1:
                 {
                 int val = (((uint16_t)dat[4])<<8) + (uint16_t)dat[5];
-                logPrint( LOG_RXTLM, "UTC-msec: %d", val);
+                logPrint( LOG_RXTLM, "UTC-msec: %-4d                ", val);
                 }
                 break;
         case 2:
@@ -88,7 +88,7 @@ void decodeDAT(uint8_t *dat)
                 float lat, vh;
                 lat = (int32_t)(((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + ((uint32_t)dat[3]));
                 vh = ((uint16_t)dat[4]<<8) + dat[5];
-		logPrint( LOG_RXTLM, "GPS-lat: %f, v_h: %f", lat*0.0000001, vh*0.01 );
+		logPrint( LOG_RXTLM, "GPS-lat: %9.6f, vh: %6.2f", lat*0.0000001, vh*0.01 );
                 }
                 break;
         case 3:
@@ -97,7 +97,7 @@ void decodeDAT(uint8_t *dat)
                 lon = (int32_t)(((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + (uint32_t)dat[3]);
                 dir = ((uint16_t)dat[4]<<8) + dat[5];
                 lon = lon*0.0000001;
-		logPrint( LOG_RXTLM, "GPS-lon: %f, dir: %d", lon, dir);
+		logPrint( LOG_RXTLM, "GPS-lon: %10.6f, dir: %-3d ", lon, dir);
                 }
                 break;
         case 4:
@@ -105,14 +105,14 @@ void decodeDAT(uint8_t *dat)
                 float alt, vv;
                 alt = ((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + dat[3];
                 vv = (int16_t)( ((int16_t)dat[4]<<8) | dat[5] );
-		logPrint( LOG_RXTLM, "GPS-hgt: %f, vv:%f", alt*0.01, vv*0.01);
+		logPrint( LOG_RXTLM, "GPS-hgt: %8.2f, v_v:%7.3f", alt*0.01, vv*0.01);
                 }
                 break;
         case 8:
                 // handled above
                 break;
         default:
-                logPrint( LOG_RXTLM, "(?)" );
+                logPrint( LOG_RXTLM, "(?)                           " );
                 break;
         }
 }
@@ -248,7 +248,8 @@ int decodeFrameDFM(uint8_t *data) {
 
 	static uint32_t lastFrm = 0;
 	printTimestamp( LOG_RXFRM, &lastFrm );
-	logPrint( LOG_RXFRM, "HAM(%d/%d/%d) ", ret0, ret1, ret2);
+#define HSTAT(d) (d<0?'E':d+'0')
+	logPrint( LOG_RXFRM, "HAM(%c/%c/%c) ", HSTAT(ret0), HSTAT(ret1), HSTAT(ret2));
         printRaw("CFG", 7, ret0, byte_conf);
         printRaw("DAT", 13, ret1, byte_dat1);
         printRaw("DAT", 13, ret2, byte_dat2);
@@ -273,12 +274,12 @@ int hammingDistance(uint32_t value1, uint32_t value2) {
     return differenceCount;
 }
 
+static uint8_t rxsearching = 1;
+static uint32_t rxdata = 0;
 int procbyte(uint8_t dt) {
         static uint8_t data[1024];
-        static uint32_t rxdata = 0;
         static uint8_t rxbitc = 0;
         static uint8_t rxbyte = 0;
-        static uint8_t rxsearching = 1;
         static uint8_t rxp;
         static int rssi=0, fei=0, afc=0;
         static uint8_t invers = 0;
@@ -413,6 +414,8 @@ void cmd_run(const char *run) {
 	// use freq is set on channel => need channel 0
 	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
 	running = 1;
+	rxsearching = 1;
+	rxdata = 0;
 	rxstat = {0};
 	rxstat.start = millis();
 }
@@ -428,8 +431,13 @@ void cmd_stop() {
 }
 
 void cmd_verb(const char *verb) {
-	int val = atoi(verb+1);
+	int val = strtol(verb+1, NULL, 16);
 	if(val || verb[1]=='0') {
+		if(verb[1]=='+') {
+			val |= logGetMask();
+		} else if (val < 0) {
+			val = logGetMask() & ( ~(-val) );
+		}
 		logSetMask(val);
 		return;
 	} else if (verb[1]=='c') {
@@ -480,14 +488,14 @@ void handle_cmd(char *str) {
 	case 'r':
 		cmd_run(str);
 		break;
-	case 'i':
-		cmd_info(str);
+	case 's': 
+		cmd_stop();
 		break;
 	case 'v':
 		cmd_verb(str);
 		break;
-	case 's': 
-		cmd_stop();
+	case 'i':
+		cmd_info(str);
 		break;
 	}
 }
