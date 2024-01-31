@@ -8,7 +8,8 @@ int running = 1;
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);     // Just to get all log messages on the serial port :)
+    logSetMask(LOG_INFO | LOG_RADIO | LOG_RXFRM | LOG_RXTLM | LOG_RXRAW | LOG_RXSTAT );
+    delay(4000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
     // si4463_poweron();
@@ -20,38 +21,35 @@ void setup() {
 void printTimestamp(uint16_t log_level, uint32_t *last) {
 	uint32_t t = millis();
 
-	uint32_t s = t / 1000; t -= 1000 * s;
+	uint32_t ms = t;
+	uint32_t s = t / 1000; ms -= 1000 * s;
 	uint32_t m = s / 60; s -= 60 * m;
 	uint32_t h = m / 60; m -= 60 * h;
 	h = h % 24;
-	logPrint(log_level, "%02d:%02d:%02d.%03d: ", h, m, s, t);
+	logPrint(log_level, "%02d:%02d:%02d.%03d ", h, m, s, ms);
 	if(last) {
 		uint32_t diff = t - *last;
 		*last = t;
-		logPrint(log_level, "(+%d.%03d)", diff/1000, (diff-diff/1000*1000));
+		logPrint(log_level, "(+%d.%03d): ", diff/1000, (diff-diff/1000*1000));
 	}
 }
 
 void printRaw(const char *label, int len, int ret, const uint8_t *data)
 {
-        Serial.print(label); Serial.print("(");
-        Serial.print(ret);
-        Serial.print("):");
+	//logPrint( LOG_RXFRM, "%s(%d): ", label, ret);
+	logPrint( LOG_RXFRM, "%s:", label);
         int i;
         for(i=0; i<len/2; i++) {
-                char str[10];
-                snprintf(str, 10, "%02X", data[i]);
-                Serial.print(str);
+                logPrint( LOG_RXFRM, "%02X", data[i]);
         }
-        Serial.print(data[i]&0x0F, HEX);
-        Serial.print(" ");
+	logPrint( LOG_RXFRM, "%01X ", data[i]&0x0F);
 }
 
 
 
 void decodeDAT(uint8_t *dat)
 {
-        Serial.print(" DAT["); Serial.print(dat[6]); Serial.print("]: ");
+        logPrint( LOG_RXTLM, " DAT[%d]: ", dat[6]);
 
         // We handle this case already here, because we need to update dfmstate.datesec before the cycle complete handling 
         if( dat[6]==8 ) {
@@ -60,18 +58,18 @@ void decodeDAT(uint8_t *dat)
                 int d = dat[2]>>3;
                 int h = ((dat[2]&0x07)<<2) + (dat[3]>>6);
                 int mi = (dat[3]&0x3F);
-                Serial.printf("Date: %04d-%02d-%02d %02d:%02dz ", y, m, d, h, mi);
+                logPrint( LOG_RXTLM, "Date: %04d-%02d-%02d %02d:%02dz ", y, m, d, h, mi);
         }
         else if( dat[6]>8 ) return; // we ignore those...
 
         switch(dat[6]) {
         case 0:
-                Serial.print("Packet counter: "); Serial.print(dat[3]); 
+                logPrint( LOG_RXTLM, "Packet counter: %d", dat[3]); 
                 break;
         case 1:
                 {
                 int val = (((uint16_t)dat[4])<<8) + (uint16_t)dat[5];
-                Serial.print("UTC-msec: "); Serial.print(val);
+                logPrint( LOG_RXTLM, "UTC-msec: %d", val);
                 }
                 break;
         case 2:
@@ -79,8 +77,7 @@ void decodeDAT(uint8_t *dat)
                 float lat, vh;
                 lat = (int32_t)(((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + ((uint32_t)dat[3]));
                 vh = ((uint16_t)dat[4]<<8) + dat[5];
-                Serial.print("GPS-lat: "); Serial.print(lat*0.0000001);
-                Serial.print(", hor-V: "); Serial.print(vh*0.01);
+		logPrint( LOG_RXTLM, "GPS-lat: %f, v_h: %f", lat*0.0000001, vh*0.01 );
                 }
                 break;
         case 3:
@@ -89,8 +86,7 @@ void decodeDAT(uint8_t *dat)
                 lon = (int32_t)(((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + (uint32_t)dat[3]);
                 dir = ((uint16_t)dat[4]<<8) + dat[5];
                 lon = lon*0.0000001;
-                Serial.print("GPS-lon: "); Serial.print(lon);
-                Serial.print(", dir: "); Serial.print(dir);
+		logPrint( LOG_RXTLM, "GPS-lon: %f, dir: %d", lon, dir);
                 }
                 break;
         case 4:
@@ -98,15 +94,14 @@ void decodeDAT(uint8_t *dat)
                 float alt, vv;
                 alt = ((uint32_t)dat[0]<<24) + ((uint32_t)dat[1]<<16) + ((uint32_t)dat[2]<<8) + dat[3];
                 vv = (int16_t)( ((int16_t)dat[4]<<8) | dat[5] );
-                Serial.print("GPS-height: "); Serial.print(alt*0.01);
-                Serial.print(", vv: "); Serial.print(vv*0.01);
+		logPrint( LOG_RXTLM, "GPS-hgt: %f, vv:%f", alt*0.01, vv*0.01);
                 }
                 break;
         case 8:
                 // handled above
                 break;
         default:
-                Serial.print("(?)");
+                logPrint( LOG_RXTLM, "(?)" );
                 break;
         }
 }
@@ -217,7 +212,6 @@ void bitsToBytes(uint8_t *bits, uint8_t *bytes, int len)
 {
         int i;
         for(i=0; i<len*4; i++) {
-                //Serial.print(bits[i]?"1":"0");
                 bytes[i/8] = (bytes[i/8]<<1) | (bits[i]?1:0);
         }
         bytes[(i-1)/8] &= 0x0F;
@@ -238,13 +232,17 @@ int decodeFrameDFM(uint8_t *data) {
         bitsToBytes(block_dat1, byte_dat1, 13);
         bitsToBytes(block_dat2, byte_dat2, 13);
 
+	static uint32_t lastFrm = 0;
+	printTimestamp( LOG_RXFRM, &lastFrm );
+	logPrint( LOG_RXFRM, "HAM(%d/%d/%d) ", ret0, ret1, ret2);
         printRaw("CFG", 7, ret0, byte_conf);
         printRaw("DAT", 13, ret1, byte_dat1);
         printRaw("DAT", 13, ret2, byte_dat2);
+	if(!logEnabled(LOG_RXTLM)) logPrint( LOG_RXFRM, "\n" );
         if (ret0>=0) decodeCFG(byte_conf);
         if (ret1>=0 && ret1<=4) decodeDAT(byte_dat1);
         if (ret2>=0 && ret2<=4) decodeDAT(byte_dat2);
-        Serial.println("");
+        logPrint( LOG_RXTLM, "\n");
         // Consistent with autorx: If more than 4 corrected bit errors in DAT block, assume it is possibly corrupt and
         // don't treat it as a correct frame (ttgo display shows data anyway, but it is not sent to external sites)
         if(ret1>4 || ret2>4) return RX_ERROR;
@@ -319,14 +317,16 @@ int procbyte(uint8_t dt) {
                                 data[rxp++] = rxbyte&0xff; // (rxbyte>>1)&0xff;
                                 if(rxp>=DFM_FRAMELEN) {
                                         rxsearching = true;
+					rxdata = 0;
 					if( logEnabled(LOG_RXRAW) ) {
-						Serial.print("RAW: ");
+						logPrint(LOG_RXRAW, "Data: ");
                                         	for(int i=0; i<DFM_FRAMELEN; i++) {
-							Serial.printf("%02x ", data[i]); 
+							logPrint(LOG_RXRAW, "%02x ", data[i]); 
 						}
 						if(bad_manchester>0)
-							Serial.printf(" [%d inval. Manch.]", bad_manchester);
-                                        	Serial.println("");
+							logPrint(LOG_RXRAW, " [%d inval. Manch.]\n", bad_manchester);
+						else
+							logPrint(LOG_RXRAW, "\n");
 					}
                                         decodeFrameDFM(data);
                                         //haveNewFrame = 1;
@@ -342,18 +342,21 @@ void cmd_power(const char *cmd)
 	if(cmd[1]=='0') {
 		Serial.println("Shutdown [SDN=1]");
 		si4463_poweroff();
+		running = 0;
 		return;
 	}
 	if(cmd[1]=='\r'||cmd[1]=='\n'||cmd[1]==0 ) {
 		Serial.println("Shutdown for powercycle [SDN=1]");
 		si4463_poweroff();
 		delay(1);  // 1ms delay. spec requires >10us, so this is generous
+		running = 0;
 	}
 	if(cmd[1]=='\r'||cmd[1]=='\n' || cmd[1]==0 || cmd[1]=='1') {
 		Serial.println("Powerup [SDN=0], patches + RF_POWER_UP SPI command");
 		si4463_poweron();
 		//si4463_test();
 		//si4463_power_up_cmd();
+		running = 0;
 
 		st_partinfo pi;
 		si4463_partinfo(&pi);
@@ -440,11 +443,7 @@ void cmd_stop() {
 }
 
 
-void handle_serial() {
-	if(!Serial.available())
-		return;
-	String msg = Serial.readStringUntil('\n');
-	const char *str = msg.c_str();
+void handle_cmd(char *str) {
 	switch(tolower(*str)) {
 	case 'p':
 		cmd_power(str);
@@ -464,9 +463,23 @@ void handle_serial() {
 	case 'v':
 		cmd_verb(str);
 		break;
-	case '\r': case '\n':
+	case 's': 
 		cmd_stop();
 		break;
+	}
+}
+
+static char serin[255];
+static int n_serin = 0;
+void handle_serial() {
+	while(Serial.available()) {
+		char ch = Serial.read();
+		if(ch=='\n' || n_serin>=254) {
+			handle_cmd(serin);
+			n_serin = 0;
+		} else {
+			serin[n_serin++] = ch;
+		}
 	}
 }
 
@@ -479,7 +492,7 @@ void loop() {
 
     // adjust offset
     // in config. MODEM_CLKGEN_BAND (0x51) is 0x09, ie. SY_SEL set (Npresc=2) ad BAND 1 (outdiv=6)
-#define outdiv 6
+#define outdiv 10
 #define Npresc 2
     //float offset = (1<<19) * outdiv * 100000.0 / Npresc / 26000000;
     //printf("Using offset value %f\n", offset);
@@ -515,7 +528,7 @@ void loop() {
         }
 #endif
         for(int i=0; i<nraw; i++) {
-            logPrint( LOG_RXRAW, "%02x ", bufraw[i]);
+            logPrint( LOG_RXDBG, "%02x ", bufraw[i]);
             procbyte(bufraw[i]);
         }
         // reset packet length, so RX will continue
@@ -525,7 +538,7 @@ void loop() {
             last = millis();
             st_modemstatus status;
             si4463_getmodemstatus(0, &status);
-            logPrint( LOG_RXDBG, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
+            logPrint( LOG_RXSTAT, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
         }
     }
     delay(20000);

@@ -1,4 +1,5 @@
 #include "logger.h"
+#include "colors.h"
 #include <Arduino.h>
 #include <stdarg.h>
 
@@ -6,12 +7,16 @@
 
 static uint16_t logmask;
 
-const char *defcol="\e[0;30m";  //black
+const char *defcol=CRESET;
+
 static const char *color(uint16_t mask) {
-	if(mask&LOG_RXRAW) return "\e[0;34m";  // blue
-	if(mask&LOG_RXFRM) return "\e[0;31m";  // red
-	if(mask&LOG_RXTLM) return "\e[43m";    //yellow bg
-	if(mask&LOG_RXDBG) return "\e[0;35m";  // mag
+	if(mask&LOG_INFO)  return BBLK;
+	if(mask&LOG_RADIO) return CYN;
+	if(mask&LOG_RXFRM) return RED;
+	if(mask&LOG_RXTLM) return GRN;
+	if(mask&LOG_RXRAW) return BLU;
+	if(mask&LOG_RXDBG) return MAG;
+	if(mask&LOG_SPI)   return YEL;
 	return defcol;
 }
 
