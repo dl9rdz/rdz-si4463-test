@@ -206,7 +206,7 @@ void si4463_sendrecv(const uint8_t *cmd, int cmdlen, uint8_t *resp, int resplen)
 // Send patches (created using WDS) and RF_POWER_UP command
 // Timing is important, so let's do this automatically as part of poweron()
 int si4463_power_up_cmd() {
-	logPrint( LOG_RADIO, "si4463_power_up_cmd()\n" );
+	logPrint( LOG_RADIO, "si4463_power_up_cmd: sending patches and powerup\n" );
 	uint8_t *initdata = Radio_Patches_Powerup_Array;
 	return si4463_send_config(initdata);
 }
@@ -308,12 +308,8 @@ int si4463_configure() {
 
 float basefreq = 400000000;   // TODO: set via config
 float chanstep = 100000;      // TODO: set via config
-static uint8_t channel;
 static int16_t freqoffset;
 
-void si4463_setchannel(uint8_t ch) {
-	channel = ch;
-}	
 // offset is 2^19 * outdiv * offset_in_Hz / (Npresc * freq_xo)
 int si4463_setfreqoffset(uint16_t offset) {
 	freqoffset = offset;

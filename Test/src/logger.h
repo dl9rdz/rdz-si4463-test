@@ -1,8 +1,11 @@
 #include <inttypes.h>
 
-void logSetMask(uint16_t mask);
 void logPrint(uint16_t type, const char *format, ...);
+
+void logSetMask(uint16_t mask);
 int logEnabled(uint16_t mask);
+
+void logSetColor(uint8_t onoff);
 
 #define LOG_INFO  (1<<0)
 #define LOG_RADIO (1<<1)

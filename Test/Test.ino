@@ -5,6 +5,17 @@
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
 int running = 1;
+float freq = 400000000;  // Freq in Hz.
+
+typedef struct st_rxstat {
+	uint32_t start;
+	uint16_t framecnt;
+	uint16_t manerr;
+	uint16_t syncerr;
+	uint16_t hamcor;
+	uint16_t hamerr;
+} t_rxstat;
+t_rxstat rxstat;
 
 void setup() {
     Serial.begin(115200);
@@ -226,6 +237,9 @@ int decodeFrameDFM(uint8_t *data) {
         int ret1 = hamming(hamming_dat1, 13, block_dat1);
         int ret2 = hamming(hamming_dat2, 13, block_dat2);
         //Serial.printf("Hamming returns %d %d %d -- %d\n", ret0, ret1, ret2, ret0|ret1|ret2);
+	if(ret0<0) rxstat.hamerr++; else rxstat.hamcor += ret0;
+	if(ret1<0) rxstat.hamerr++; else rxstat.hamcor += ret1;
+	if(ret2<0) rxstat.hamerr++; else rxstat.hamcor += ret2;
 
         byte byte_conf[4], byte_dat1[7], byte_dat2[7];
         bitsToBytes(block_conf, byte_conf, 7);
@@ -268,7 +282,7 @@ int procbyte(uint8_t dt) {
         static uint8_t rxp;
         static int rssi=0, fei=0, afc=0;
         static uint8_t invers = 0;
-	uint8_t bad_manchester = 0; 
+	static uint8_t bad_manchester = 0; 
         
         for(int i=0; i<8; i++) {
                 uint8_t d = (dt&0x80)?1:0;
@@ -300,15 +314,12 @@ int procbyte(uint8_t dt) {
 					logPrint(LOG_RXRAW, "SYNC[%08x/--] ", rxdata);
 				else
 					logPrint(LOG_RXRAW, "SYNC[%08x/%de] ", rxdata, d);
+				rxstat.syncerr += d;
                                 rxsearching = false;
                                 rxbitc = 0;
                                 rxp = 0;
                                 rxbyte = 0;
 				bad_manchester = 0;
-#if 0
-                                //invers = (rxdata == 0x6566A5AA)?1:0;
-                                invers = hammingDistance(rxdata, 0x6566A5AA)<=3 ?1:0;
-#endif
                         }
                 } else {
                         rxbitc = (rxbitc+1)%16; // 16;
@@ -329,6 +340,8 @@ int procbyte(uint8_t dt) {
 							logPrint(LOG_RXRAW, "\n");
 					}
                                         decodeFrameDFM(data);
+					rxstat.framecnt++;
+					rxstat.manerr += bad_manchester;
                                         //haveNewFrame = 1;
                                 }
                         }
@@ -372,26 +385,26 @@ void cmd_config(const char *config)
 {
 	// TODO: Support multiple configs
 	si4463_send_config(Radio_Configuration_Data_Array);
+
+	// Config contains WDS-generated default freq, switch to "right" freq
+	Serial.printf("Config sent, setting freq to %f\n", freq);
+	si4463_setfreq(freq);
 }
 
-void cmd_freq(const char *freq)
+void cmd_freq(const char *freqstr)
 {
-	int val = atoi(freq+1);
-	if(val < 256) {
-		// number 0..255: direct channel number
-		si4463_setchannel((uint8_t)val);
+	int val = atoi(freqstr+1);
+	if (val < 100) {
+		freq = 400000000 + val * 100000;
+	} else if (val > 100000) {
+		// frequency in kHz
+		freq = 1000.0 * val;
 	} else {
-		float f;
-		if (val > 100000) {
-			// frequency in kHz
-			f = 1000.0 * val;
-		} else {
-			// frequency in MHz
-			f = atof(freq+1) * 1000000;
-		}
-		Serial.printf("(val:%d) Setting frequency to %f MHz\n", val, 0.000001 * f);
-		si4463_setfreq(f);
+		// frequency in MHz
+		freq = atof(freqstr+1) * 1000000;
 	}
+	Serial.printf("(val:%d) Setting frequency to %f MHz\n", val, 0.000001 * freq);
+	si4463_setfreq(freq);
 }
 
 
@@ -400,6 +413,18 @@ void cmd_run(const char *run) {
 	// use freq is set on channel => need channel 0
 	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
 	running = 1;
+	rxstat = {0};
+	rxstat.start = millis();
+}
+
+void cmd_stop() {
+	uint32_t stop = millis();
+	uint32_t diff = stop - rxstat.start;
+	logPrint( LOG_INFO, "Stop t(run)=%d.%ds RX: %d frames, %d sync biterr, %d bad machester Hamming: %d corrected, %d fail\n", diff/1000, diff-(diff/1000*1000), rxstat.framecnt,
+		rxstat.syncerr, rxstat.manerr, rxstat.hamcor, rxstat.hamerr );	
+	// TODO: print some statistics
+	// TODO stop the RX
+	running = 0;
 }
 
 void cmd_verb(const char *verb) {
@@ -407,6 +432,10 @@ void cmd_verb(const char *verb) {
 	if(val || verb[1]=='0') {
 		logSetMask(val);
 		return;
+	} else if (verb[1]=='c') {
+		logSetColor(0);
+	} else if (verb[1]=='C') {
+		logSetColor(1);
 	}
 }
 
@@ -434,12 +463,6 @@ void cmd_info(const char *info) {
 		}
 		info++;
 	}
-}
-
-void cmd_stop() {
-	// TODO stop the RX
-	// TODO: print some statistics
-	running = 0;
 }
 
 

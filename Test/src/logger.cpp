@@ -6,10 +6,12 @@
 // Simple configurable logger
 
 static uint16_t logmask;
+static uint8_t useColor = 1;
 
 const char *defcol=CRESET;
 
 static const char *color(uint16_t mask) {
+	if(!useColor) return "";
 	if(mask&LOG_INFO)  return BBLK;
 	if(mask&LOG_RADIO) return CYN;
 	if(mask&LOG_RXFRM) return RED;
@@ -18,6 +20,11 @@ static const char *color(uint16_t mask) {
 	if(mask&LOG_RXDBG) return MAG;
 	if(mask&LOG_SPI)   return YEL;
 	return defcol;
+}
+
+void logSetColor(uint8_t onoff) {
+	useColor = onoff;
+	if(!useColor) Serial.print( defcol ); // make sure color is off
 }
 
 void logSetMask(uint16_t mask) {
@@ -38,7 +45,7 @@ void logPrint(uint16_t type, const char *format, ...)
 		Serial.print( color(type) );
                 vsnprintf( buf, 256, format, args );
                 Serial.print( buf );
-		Serial.print( color(0) );
+		Serial.print( defcol );
         }
         va_end(args);
 }

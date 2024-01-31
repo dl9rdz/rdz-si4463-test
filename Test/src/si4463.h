@@ -29,9 +29,8 @@ void si4463_reset();
 int si4463_send_config(uint8_t *initdata);
 int si4463_configure();
 
-void si4463_setchannel(uint8_t ch);
-int si4463_setfreqoffset(uint16_t offset);
 void si4463_setfreq(float f);
+int si4463_setfreqoffset(uint16_t offset);
 
 
 int si4463_partinfo(st_partinfo *pi);
