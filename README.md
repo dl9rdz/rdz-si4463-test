@@ -22,8 +22,8 @@
 | Command   | Function |
 |---|---|
 | P         | -> Powercycle |
-| Fnnn.nn   | -> Set RX Frequency |
+| Fnnn.nn   | -> Set RX Frequency (active after next "run" command) |
 | C         | -> Send WDS config to Si4463 |
 | R         | -> Run (START_RX) |
 | S         | -> Stop (+print statistics) |
-| Vxx       | -> Verbosity (bitmask, hex) x=00..ff, vC color on, vc color off |
+| Vxx       | -> Verbosity (bitmask, hex) x=00..ff, vK color on, vk color off |
