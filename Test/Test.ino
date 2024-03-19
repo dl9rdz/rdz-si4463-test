@@ -2,8 +2,11 @@
 #include "src/si4463.h"
 #include "src/logger.h"
 
+// LOG_RXRAW: 
+
+
 #define DEFAULT_LOGMASK (LOG_INFO | LOG_RADIO | LOG_RXFRM | LOG_RXTLM | LOG_RXRAW | LOG_RXSTAT )
-#define DEFAULT_COLOR 0
+#define DEFAULT_USECOLOR 0
 
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
@@ -28,7 +31,7 @@ t_rxstat rxstat;
 void setup() {
     Serial.begin(115200);
     logSetMask( DEFAULT_LOGMASK );
-    logSetColor( DEFAULT_COLOR );
+    logSetColor( DEFAULT_USECOLOR );
     delay(4000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
@@ -447,9 +450,9 @@ void cmd_verb(const char *verb) {
 		}
 		logSetMask(val);
 		return;
-	} else if (verb[1]=='c') {
+	} else if (verb[1]=='k') {
 		logSetColor(0);
-	} else if (verb[1]=='C') {
+	} else if (verb[1]=='K') {
 		logSetColor(1);
 	}
 }
