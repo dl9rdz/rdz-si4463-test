@@ -440,6 +440,10 @@ void cmd_freq(const char *freqstr)
 
 
 void cmd_run(const char *run) {
+	if(strcmp(run,"reset")==0) { 
+		Serial.println("\nESP32 reset\n");
+		esp_restart();
+	}
 	// Start receiver
 	// use freq is set on channel => need channel 0
 	si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
