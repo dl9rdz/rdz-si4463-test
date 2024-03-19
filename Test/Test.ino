@@ -266,7 +266,10 @@ int decodeFrameDFM(uint8_t *data) {
         printRaw("CFG", 7, ret0, byte_conf);
         printRaw("DAT", 13, ret1, byte_dat1);
         printRaw("DAT", 13, ret2, byte_dat2);
-	if(!logEnabled(LOG_RXTLM)) logPrint( LOG_RXFRM, "\n" );
+	//if(!logEnabled(LOG_RXTLM))
+	logPrint( LOG_RXFRM, "\n" );
+	static uint32_t lastTlm = 0;
+	printTimestamp( LOG_RXTLM, &lastTlm );
         if (ret0>=0) decodeCFG(byte_conf);
         if (ret1>=0 && ret1<=4) decodeDAT(byte_dat1);
         if (ret2>=0 && ret2<=4) decodeDAT(byte_dat2);
@@ -286,6 +289,20 @@ int hammingDistance(uint32_t value1, uint32_t value2) {
 
     return differenceCount;
 }
+
+static uint32_t lastRSSI = 0;
+// print RSSI + AFC (if more than delta_t passed since last printing)
+void printModemStatus(int delta_t) {
+        if( (millis()-lastRSSI)>delta_t ) {
+            lastRSSI = millis();
+            st_modemstatus status;
+            si4463_getmodemstatus(0, &status);
+            logPrint( LOG_RXSTAT, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
+        }
+}
+
+#define LOG_RXDBG (1<<6)
+#define LOG_SPI   (1<<7)
 
 static uint8_t rxsearching = 1;
 static uint32_t rxdata = 0;
@@ -345,14 +362,16 @@ int procbyte(uint8_t dt) {
 					rxdata = 0;
 					if( logEnabled(LOG_RXRAW) ) {
 						logPrint(LOG_RXRAW, "Data: ");
+						uint8_t mask = invers ? 0xFF : 0;
                                         	for(int i=0; i<DFM_FRAMELEN; i++) {
-							logPrint(LOG_RXRAW, "%02x ", data[i]); 
+							logPrint(LOG_RXRAW, "%02x ", data[i] ^ mask); 
 						}
 						if(bad_manchester>0)
 							logPrint(LOG_RXRAW, " [%d inval. Manch.]\n", bad_manchester);
 						else
 							logPrint(LOG_RXRAW, "\n");
 					}
+					printModemStatus(1000); // print RSSI (and possibly AFC)
                                         decodeFrameDFM(data);
 					rxstat.framecnt++;
 					rxstat.manerr += bad_manchester;
@@ -434,7 +453,7 @@ void cmd_run(const char *run) {
 void cmd_stop() {
 	uint32_t stop = millis();
 	uint32_t diff = stop - rxstat.start;
-	logPrint( LOG_INFO, "Stop t(run)=%d.%ds RX: %d frames, %d sync biterr, %d bad machester Hamming: %d corrected, %d fail\n", diff/1000, diff-(diff/1000*1000), rxstat.framecnt,
+	logPrint( LOG_INFO, "\nStop t(run)=%d.%ds RX: %d frames, %d sync biterr, %d bad machester Hamming: %d corrected, %d fail\n", diff/1000, diff-(diff/1000*1000), rxstat.framecnt,
 		rxstat.syncerr, rxstat.manerr, rxstat.hamcor, rxstat.hamerr );	
 	// TODO stop the RX
 	running = 0;
@@ -545,7 +564,6 @@ void loop() {
     //si4463_startrx(33, 0, /*255*/ /*8191*/ /*66*/ 0 /*len*/, 0, 0, 0);
     //si4463_startrx(35, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 8, 8, 8);
     si4463_startrx(0, 0, /*255*/ /*8191*/ /*66*/ /*32*8*2*/ 0 /*len*/, 0, 0, 0);
-    int last = millis();
     si4463_raw_activate();
     while(1) {
         //delay(1000);
@@ -577,12 +595,7 @@ void loop() {
         // reset packet length, so RX will continue
         //si4463_startrx(35, 0, 66/*len*/, 0, 0, 0);
 
-        if( (millis()-last)>1000 ) {
-            last = millis();
-            st_modemstatus status;
-            si4463_getmodemstatus(0, &status);
-            logPrint( LOG_RXSTAT, "RSSI: %d   AFC: %d\n", status.curr_rssi, status.afc_freq_offset);
-        }
+	printModemStatus(1500);
     }
     // will never leave. good enough for now.
 }
