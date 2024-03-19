@@ -2,10 +2,18 @@
 #include "src/si4463.h"
 #include "src/logger.h"
 
+#define DEFAULT_LOGMASK (LOG_INFO | LOG_RADIO | LOG_RXFRM | LOG_RXTLM | LOG_RXRAW | LOG_RXSTAT )
+#define DEFAULT_COLOR 0
+
 enum RxResult { RX_OK, RX_TIMEOUT, RX_ERROR, RX_UNKNOWN, RX_NOPOS };
 
+
+
 int running = 0;
-float freq = 403500000;  // Freq in Hz.
+float freq = 403200000;  // Freq in Hz.
+
+
+
 
 typedef struct st_rxstat {
 	uint32_t start;
@@ -19,7 +27,8 @@ t_rxstat rxstat;
 
 void setup() {
     Serial.begin(115200);
-    logSetMask(LOG_INFO | LOG_RADIO | LOG_RXFRM | LOG_RXTLM | LOG_RXRAW | LOG_RXSTAT );
+    logSetMask( DEFAULT_LOGMASK );
+    logSetColor( DEFAULT_COLOR );
     delay(4000);     // Just to get all log messages on the serial port :)
     si4463_init();   // Initialize SPI bus
     si4463_reset();  // Power-cycle the radio chip
@@ -503,7 +512,8 @@ static int n_serin = 0;
 void handle_serial() {
 	while(Serial.available()) {
 		char ch = Serial.read();
-		if(ch=='\n' || n_serin>=254) {
+		if(ch=='\n' || ch=='\r' || n_serin>=254) {
+			serin[n_serin++] = 0;
 			handle_cmd(serin);
 			n_serin = 0;
 		} else {
