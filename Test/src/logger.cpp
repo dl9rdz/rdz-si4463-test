@@ -6,7 +6,7 @@
 // Simple configurable logger
 
 static uint16_t logmask;
-static uint8_t useColor = 1;
+static uint8_t useColor = 0;
 
 const char *defcol=CRESET;
 
@@ -45,10 +45,12 @@ void logPrint(uint16_t type, const char *format, ...)
         va_start(args, format);
         if( type & logmask ) {
                 char buf[256];
-		Serial.print( color(type) );
+		if(useColor)
+			Serial.print( color(type) );
                 vsnprintf( buf, 256, format, args );
                 Serial.print( buf );
-		Serial.print( defcol );
+		if(useColor)
+			Serial.print( defcol );
         }
         va_end(args);
 }
